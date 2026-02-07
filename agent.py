@@ -10,7 +10,12 @@ from state import StateManager
 from storage_utils import load_json, save_json, update_json_list
 from slack_reader import fetch_slack_threads, normalize_thread
 from llm_pipeline.classify_points import classify_conversation, create_artifact_from_classification
-from art_utils import transform_all_artifacts
+from src.adapters.repo_json import (
+    JsonArtifactRepository,
+    JsonOpenQuestionRepository,
+    JsonProposedUpdateRepository,
+)
+from src.use_cases.transform_artifacts import TransformArtifactsUseCase
 from oq_utils import create_pu_from_oq
 
 class SpecsUpdatesAgent:
@@ -139,7 +144,12 @@ class SpecsUpdatesAgent:
 
     def cmd_artifact_transform(self, args):
         print("Transforming artifacts...")
-        oq_count, pu_count = transform_all_artifacts()
+        artifact_repo = JsonArtifactRepository()
+        oq_repo = JsonOpenQuestionRepository()
+        pu_repo = JsonProposedUpdateRepository()
+        use_case = TransformArtifactsUseCase(artifact_repo, oq_repo, pu_repo)
+
+        oq_count, pu_count = use_case.execute()
         print(f"Created {oq_count} Open Questions and {pu_count} Proposed Updates.")
         
         if oq_count > 0:
