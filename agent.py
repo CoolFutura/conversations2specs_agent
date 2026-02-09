@@ -1,26 +1,48 @@
 import sys
 import argparse
-import uuid
 import os
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
 from state import StateManager
-from storage_utils import load_json, save_json, update_json_list
+from storage_utils import load_json, save_json
 from slack_reader import fetch_slack_threads, normalize_thread
 from llm_pipeline.classify_points import classify_conversation, create_artifact_from_classification
 from src.adapters.repo_json import (
     JsonArtifactRepository,
     JsonOpenQuestionRepository,
     JsonProposedUpdateRepository,
+    JsonSpecUpdateRepository,
 )
 from src.use_cases.transform_artifacts import TransformArtifactsUseCase
-from oq_utils import create_pu_from_oq
+from src.use_cases.transform_oq import TransformOQUseCase
+from src.use_cases.approve_pu import ApprovePUUseCase
+from src.use_cases.add_decision import AddDecisionUseCase
 
 class SpecsUpdatesAgent:
     def __init__(self):
         self.state_manager = StateManager()
+
+    def build_transform_artifacts_use_case(self):
+        artifact_repo = JsonArtifactRepository()
+        oq_repo = JsonOpenQuestionRepository()
+        pu_repo = JsonProposedUpdateRepository()
+        return TransformArtifactsUseCase(artifact_repo, oq_repo, pu_repo)
+
+    def build_transform_oq_use_case(self):
+        oq_repo = JsonOpenQuestionRepository()
+        pu_repo = JsonProposedUpdateRepository()
+        return TransformOQUseCase(oq_repo, pu_repo)
+
+    def build_approve_pu_use_case(self):
+        pu_repo = JsonProposedUpdateRepository()
+        spec_repo = JsonSpecUpdateRepository()
+        return ApprovePUUseCase(pu_repo, spec_repo)
+
+    def build_add_decision_use_case(self):
+        oq_repo = JsonOpenQuestionRepository()
+        return AddDecisionUseCase(oq_repo)
 
     def run(self):
         parser = argparse.ArgumentParser(description="Specs Updates Generator CLI")
@@ -42,9 +64,12 @@ class SpecsUpdatesAgent:
         oq_mod_parser = subparsers.add_parser("oq_modify", help="Modify an Open Question")
         oq_mod_parser.add_argument("oq_id", help="OQ ID")
 
+        # Command: oq_decide
+        oq_decide_parser = subparsers.add_parser("oq_decide", help="Add a decision to an Open Question")
+        oq_decide_parser.add_argument("oq_id", help="OQ ID")
+
         # Command: oq_transform
-        oq_trans_parser = subparsers.add_parser("oq_transform", help="Transform an OQ into a PU")
-        oq_trans_parser.add_argument("oq_id", help="OQ ID")
+        subparsers.add_parser("oq_transform", help="Transform decided OQs into PUs")
 
         # Command: approve_pu
         pu_app_parser = subparsers.add_parser("approve_pu", help="Approve a Proposed Update")
@@ -144,10 +169,7 @@ class SpecsUpdatesAgent:
 
     def cmd_artifact_transform(self, args):
         print("Transforming artifacts...")
-        artifact_repo = JsonArtifactRepository()
-        oq_repo = JsonOpenQuestionRepository()
-        pu_repo = JsonProposedUpdateRepository()
-        use_case = TransformArtifactsUseCase(artifact_repo, oq_repo, pu_repo)
+        use_case = self.build_transform_artifacts_use_case()
 
         oq_count, pu_count = use_case.execute()
         print(f"Created {oq_count} Open Questions and {pu_count} Proposed Updates.")
@@ -163,48 +185,42 @@ class SpecsUpdatesAgent:
         print(f"New state: {self.state_manager.get_current_state()}")
 
     def cmd_oq_transform(self, args):
-        print(f"Transforming OQ {args.oq_id} to PU...")
+        print("Transforming decided OQs to PUs...")
+        use_case = self.build_transform_oq_use_case()
+        result = use_case.execute()
+
+        print(f"Created {result.transformed_count} Proposed Updates.")
+        if result.open_questions_remaining == 0 and result.transformed_count > 0:
+            self.state_manager.set_state("PU PROCESSING")
+            print("All OQs processed. State changed to: PU PROCESSING")
+
+    def cmd_oq_decide(self, args):
+        print(f"Adding decision to OQ {args.oq_id}...")
         decision = input("Enter the decision for this OQ: ")
-        rationale = input("Enter the rationale (optional): ")
-        
-        pu = create_pu_from_oq(args.oq_id, decision, rationale)
-        if pu:
-            print(f"Created Proposed Update: {pu['id']}")
-            # Check if more OQs are OPEN
-            oq_data = load_json("open_questions.json")
-            open_count = sum(1 for oq in oq_data.get("questions", []) if oq["status"] == "OPEN")
-            if open_count == 0:
-                self.state_manager.set_state("PU PROCESSING")
-                print("All OQs processed. State changed to: PU PROCESSING")
+        rationale = input("Enter the rationale: ")
+
+        use_case = self.build_add_decision_use_case()
+        result = use_case.execute(args.oq_id, decision, rationale)
+
+        if not result.updated:
+            print(f"OQ {args.oq_id} not found.")
+            return
+
+        print(f"Decision saved for OQ {args.oq_id}.")
 
     def cmd_approve_pu(self, args):
         print(f"Approving PU {args.pu_id}...")
-        pu_data = load_json("proposed_updates.json")
-        target_pu = None
-        for pu in pu_data.get("updates", []):
-            if pu["id"] == args.pu_id:
-                pu["status"] = "APPROVED"
-                target_pu = pu
-                break
-        
-        if target_pu:
-            save_json("proposed_updates.json", pu_data)
-            # Create SU
-            su = {
-                "id": f"su_{uuid.uuid4().hex[:8]}",
-                "pu_id": target_pu["id"],
-                "content": target_pu["rephrasing"],
-                "decision": target_pu["decision"],
-                "status": "ACTIVE"
-            }
-            update_json_list("specs_updates.json", "updates", su)
-            print(f"Spec Update {su['id']} created.")
-            
-            # Check if more PUs are DRAFT
-            draft_count = sum(1 for pu in pu_data.get("updates", []) if pu["status"] == "DRAFT")
-            if draft_count == 0:
-                self.state_manager.set_state("FINALIZE")
-                print("All PUs processed. State changed to: FINALIZE")
+        use_case = self.build_approve_pu_use_case()
+        result = use_case.execute(args.pu_id)
+
+        if not result.spec_update:
+            print(f"PU {args.pu_id} not found.")
+            return
+
+        print(f"Spec Update {result.spec_update.id} created.")
+        if result.remaining_drafts == 0:
+            self.state_manager.set_state("FINALIZE")
+            print("All PUs processed. State changed to: FINALIZE")
 
     def cmd_oq_modify(self, args):
         print(f"Modifying OQ {args.oq_id} (Not yet fully implemented)")
@@ -244,13 +260,16 @@ class SpecsUpdatesAgent:
         if not questions:
             print("No open questions found.")
             return
-        print(f"{'ID':<25} {'Status':<15} {'Question'}")
-        print("-" * 80)
+        print(f"{'ID':<25} {'Status':<15} {'Decided':<10} {'Question'}")
+        print("-" * 95)
         for oq in questions:
             question = oq.get('question', 'N/A')
             if len(question) > 60:
                 question = question[:57] + "..."
-            print(f"{oq['id']:<25} {oq['status']:<15} {question}")
+            decision = oq.get("decision")
+            rationale = oq.get("decision_rationale")
+            decided = "YES" if decision and rationale and str(decision).strip() and str(rationale).strip() else "NO"
+            print(f"{oq['id']:<25} {oq['status']:<15} {decided:<10} {question}")
 
     def cmd_pu_list(self, args):
         data = load_json("proposed_updates.json")

@@ -5,6 +5,7 @@ from src.ports.repositories import ArtifactRepository, OpenQuestionRepository, P
 
 
 class TransformArtifactsUseCase:
+    # Orchestrates the conversion of pending artifacts into OQs/PUs via repositories.
     def __init__(
         self,
         artifact_repo: ArtifactRepository,

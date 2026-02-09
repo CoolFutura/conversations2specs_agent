@@ -32,7 +32,9 @@ def create_oq_from_artifact(artifact):
         "question": artifact["rephrasing"],
         "context": artifact["summary_of_context"],
         "status": "OPEN",
-        "slack_ts": None
+        "slack_ts": None,
+        "decision": None,
+        "decision_rationale": None,
     }
     update_json_list("open_questions.json", "questions", oq)
 

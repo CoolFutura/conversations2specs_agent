@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Iterable
 
-from src.domain.models import Artifact, ArtifactType, OpenQuestion, ProposedUpdate
+from src.domain.models import Artifact, ArtifactType, OpenQuestion, ProposedUpdate, SpecUpdate
 from storage_utils import load_json, save_json
 
 
@@ -54,6 +54,34 @@ class JsonArtifactRepository:
 
 
 class JsonOpenQuestionRepository:
+    def list_all(self) -> Iterable[OpenQuestion]:
+        data = load_json("open_questions.json")
+        questions = data.get("questions", [])
+        return [self._from_dict(item) for item in questions]
+
+    def get_by_id(self, oq_id: str) -> OpenQuestion | None:
+        for oq in self.list_all():
+            if oq.id == oq_id:
+                return oq
+        return None
+
+    def save(self, oq: OpenQuestion) -> None:
+        data = load_json("open_questions.json")
+        questions = data.get("questions", [])
+
+        updated = False
+        for idx, item in enumerate(questions):
+            if item.get("id") == oq.id:
+                questions[idx] = self._to_dict(oq)
+                updated = True
+                break
+
+        if not updated:
+            questions.append(self._to_dict(oq))
+
+        data["questions"] = questions
+        save_json("open_questions.json", data)
+
     def create_from_artifact(self, artifact: Artifact) -> OpenQuestion:
         oq = OpenQuestion(
             id=f"oq_{uuid.uuid4().hex[:8]}",
@@ -62,6 +90,8 @@ class JsonOpenQuestionRepository:
             context=artifact.summary_of_context,
             status="OPEN",
             slack_ts=None,
+            decision=None,
+            decision_rationale=None,
         )
 
         data = load_json("open_questions.json")
@@ -79,10 +109,52 @@ class JsonOpenQuestionRepository:
             "context": oq.context,
             "status": oq.status,
             "slack_ts": oq.slack_ts,
+            "decision": oq.decision,
+            "decision_rationale": oq.decision_rationale,
         }
+
+    def _from_dict(self, item: dict) -> OpenQuestion:
+        return OpenQuestion(
+            id=item["id"],
+            artifact_id=item.get("artifact_id", ""),
+            question=item.get("question", ""),
+            context=item.get("context", ""),
+            status=item.get("status", "OPEN"),
+            slack_ts=item.get("slack_ts"),
+            decision=item.get("decision"),
+            decision_rationale=item.get("decision_rationale"),
+        )
 
 
 class JsonProposedUpdateRepository:
+    def list_all(self) -> Iterable[ProposedUpdate]:
+        data = load_json("proposed_updates.json")
+        updates = data.get("updates", [])
+        return [self._from_dict(item) for item in updates]
+
+    def get_by_id(self, pu_id: str) -> ProposedUpdate | None:
+        for pu in self.list_all():
+            if pu.id == pu_id:
+                return pu
+        return None
+
+    def save(self, pu: ProposedUpdate) -> None:
+        data = load_json("proposed_updates.json")
+        updates = data.get("updates", [])
+
+        updated = False
+        for idx, item in enumerate(updates):
+            if item.get("id") == pu.id:
+                updates[idx] = self._to_dict(pu)
+                updated = True
+                break
+
+        if not updated:
+            updates.append(self._to_dict(pu))
+
+        data["updates"] = updates
+        save_json("proposed_updates.json", data)
+
     def create_from_artifact(self, artifact: Artifact) -> ProposedUpdate:
         pu = ProposedUpdate(
             id=f"pu_{uuid.uuid4().hex[:8]}",
@@ -112,4 +184,44 @@ class JsonProposedUpdateRepository:
             "decision": pu.decision,
             "rationale": pu.rationale,
             "status": pu.status,
+        }
+
+    def _from_dict(self, item: dict) -> ProposedUpdate:
+        return ProposedUpdate(
+            id=item["id"],
+            artifact_id=item.get("artifact_id", ""),
+            source_oq_id=item.get("source_oq_id"),
+            rephrasing=item.get("rephrasing", ""),
+            context=item.get("context", ""),
+            decision=item.get("decision", ""),
+            rationale=item.get("rationale", ""),
+            status=item.get("status", "DRAFT"),
+        )
+
+
+class JsonSpecUpdateRepository:
+    def save(self, spec_update: SpecUpdate) -> None:
+        data = load_json("specs_updates.json")
+        updates = data.get("updates", [])
+
+        updated = False
+        for idx, item in enumerate(updates):
+            if item.get("id") == spec_update.id:
+                updates[idx] = self._to_dict(spec_update)
+                updated = True
+                break
+
+        if not updated:
+            updates.append(self._to_dict(spec_update))
+
+        data["updates"] = updates
+        save_json("specs_updates.json", data)
+
+    def _to_dict(self, spec_update: SpecUpdate) -> dict:
+        return {
+            "id": spec_update.id,
+            "pu_id": spec_update.pu_id,
+            "content": spec_update.content,
+            "decision": spec_update.decision,
+            "status": spec_update.status,
         }

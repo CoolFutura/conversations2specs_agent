@@ -30,6 +30,8 @@ class OpenQuestion:
     context: str
     status: str
     slack_ts: Optional[str] = None
+    decision: Optional[str] = None
+    decision_rationale: Optional[str] = None
 
 
 @dataclass
@@ -41,4 +43,13 @@ class ProposedUpdate:
     context: str
     decision: str
     rationale: str
+    status: str
+
+
+@dataclass
+class SpecUpdate:
+    id: str
+    pu_id: str
+    content: str
+    decision: str
     status: str

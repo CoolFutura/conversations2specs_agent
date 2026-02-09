@@ -44,6 +44,7 @@ class FakePURepo:
         return artifact
 
 
+# Verifies that TransformArtifactsUseCase creates OQs/PUs and persists updates correctly.
 class TransformArtifactsUseCaseTests(unittest.TestCase):
     def test_creates_oq_and_pu_and_updates_status_and_saves(self):
         artifacts = [
