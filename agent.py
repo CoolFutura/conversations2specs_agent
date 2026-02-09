@@ -19,6 +19,7 @@ from src.use_cases.transform_artifacts import TransformArtifactsUseCase
 from src.use_cases.transform_oq import TransformOQUseCase
 from src.use_cases.approve_pu import ApprovePUUseCase
 from src.use_cases.add_decision import AddDecisionUseCase
+from src.use_cases.modify_oq import ModifyOQUseCase
 
 class SpecsUpdatesAgent:
     def __init__(self):
@@ -43,6 +44,10 @@ class SpecsUpdatesAgent:
     def build_add_decision_use_case(self):
         oq_repo = JsonOpenQuestionRepository()
         return AddDecisionUseCase(oq_repo)
+
+    def build_modify_oq_use_case(self):
+        oq_repo = JsonOpenQuestionRepository()
+        return ModifyOQUseCase(oq_repo)
 
     def run(self):
         parser = argparse.ArgumentParser(description="Specs Updates Generator CLI")
@@ -223,7 +228,44 @@ class SpecsUpdatesAgent:
             print("All PUs processed. State changed to: FINALIZE")
 
     def cmd_oq_modify(self, args):
-        print(f"Modifying OQ {args.oq_id} (Not yet fully implemented)")
+        oq_repo = JsonOpenQuestionRepository()
+        oq = oq_repo.get_by_id(args.oq_id)
+        if not oq:
+            print(f"OQ {args.oq_id} not found.")
+            return
+
+        print(f"Modifying OQ {args.oq_id}...")
+
+        def ask_yes_no(prompt):
+            answer = input(f"{prompt} (y/n): ").strip().lower()
+            return answer in {"y", "yes"}
+
+        updates = {}
+        print(f"Current question: {oq.question}")
+        if ask_yes_no("Do you want to modify the question"):
+            updates["question"] = input("New question: ")
+        print(f"Current context: {oq.context}")
+        if ask_yes_no("Do you want to modify the context"):
+            updates["context"] = input("New context: ")
+        print(f"Current decision: {oq.decision or ''}")
+        if ask_yes_no("Do you want to modify the decision"):
+            updates["decision"] = input("New decision: ")
+        print(f"Current decision rationale: {oq.decision_rationale or ''}")
+        if ask_yes_no("Do you want to modify the decision rationale"):
+            updates["decision_rationale"] = input("New decision rationale: ")
+
+        if not updates:
+            print("No changes made.")
+            return
+
+        use_case = self.build_modify_oq_use_case()
+        result = use_case.execute(args.oq_id, **updates)
+
+        if not result.updated:
+            print(f"OQ {args.oq_id} not found.")
+            return
+
+        print(f"OQ {args.oq_id} updated.")
 
     def cmd_init_sync(self, args):
         channel_id = args.channel or os.getenv("SLACK_CHANNEL_ID", "general")
