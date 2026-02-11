@@ -155,6 +155,13 @@ class JsonProposedUpdateRepository:
         data["updates"] = updates
         save_json("proposed_updates.json", data)
 
+    def delete_by_source_oq_id(self, oq_id: str) -> None:
+        data = load_json("proposed_updates.json")
+        updates = data.get("updates", [])
+        updates = [item for item in updates if item.get("source_oq_id") != oq_id]
+        data["updates"] = updates
+        save_json("proposed_updates.json", data)
+
     def create_from_artifact(self, artifact: Artifact) -> ProposedUpdate:
         pu = ProposedUpdate(
             id=f"pu_{uuid.uuid4().hex[:8]}",

@@ -7,8 +7,13 @@ load_dotenv(override=True)
 
 from state import StateManager
 from storage_utils import load_json, save_json
-from slack_reader import fetch_slack_threads, normalize_thread
-from llm_pipeline.classify_points import classify_conversation, create_artifact_from_classification
+from slack_reader import normalize_thread
+from src.adapters.slack_sdk import SlackSDKThreadsAdapter
+from src.adapters.trace_json import JsonTraceabilityAdapter
+from src.adapters.llm_openai import OpenAILLMClassifier
+from src.use_cases.ingest_threads import IngestThreadsUseCase
+from src.use_cases.fetch_threads import FetchThreadsUseCase
+from src.use_cases.trace_ingest import TraceIngestUseCase
 from src.adapters.repo_json import (
     JsonArtifactRepository,
     JsonOpenQuestionRepository,
@@ -31,6 +36,19 @@ class SpecsUpdatesAgent:
         pu_repo = JsonProposedUpdateRepository()
         return TransformArtifactsUseCase(artifact_repo, oq_repo, pu_repo)
 
+    def build_ingest_threads_use_case(self):
+        llm_classifier = OpenAILLMClassifier()
+        artifact_repo = JsonArtifactRepository()
+        return IngestThreadsUseCase(llm_classifier, artifact_repo, normalize_thread)
+
+    def build_fetch_threads_use_case(self):
+        slack_adapter = SlackSDKThreadsAdapter()
+        return FetchThreadsUseCase(slack_adapter)
+
+    def build_trace_ingest_use_case(self):
+        trace_adapter = JsonTraceabilityAdapter()
+        return TraceIngestUseCase(trace_adapter)
+
     def build_transform_oq_use_case(self):
         oq_repo = JsonOpenQuestionRepository()
         pu_repo = JsonProposedUpdateRepository()
@@ -47,7 +65,8 @@ class SpecsUpdatesAgent:
 
     def build_modify_oq_use_case(self):
         oq_repo = JsonOpenQuestionRepository()
-        return ModifyOQUseCase(oq_repo)
+        pu_repo = JsonProposedUpdateRepository()
+        return ModifyOQUseCase(oq_repo, pu_repo)
 
     def run(self):
         parser = argparse.ArgumentParser(description="Specs Updates Generator CLI")
@@ -116,43 +135,23 @@ class SpecsUpdatesAgent:
         channel_id = args.channel
         print(f"Ingesting Slack threads from {channel_id}...")
         
-        threads = fetch_slack_threads(channel_id)
+        fetch_use_case = self.build_fetch_threads_use_case()
+        threads = fetch_use_case.execute(channel_id).threads
         if not threads:
             print("No new threads found.")
             return
 
-        # Traceability: Save raw threads
-        save_json("slack_threads.json", {"threads": threads})
+        # Traceability: Save raw threads + normalized conversations
+        trace_use_case = self.build_trace_ingest_use_case()
         
         self.state_manager.start_run()
-        
-        # Load existing artifacts to check for duplicates
-        existing_artifacts = load_json("artifacts.json").get("artifacts", [])
-        existing_conv_ids = {art["conversation_id"] for art in existing_artifacts}
-        
-        conversations = []
-        artifacts_created = 0
-        
-        for thread in threads:
-            ts = thread["ts"]
-            conv_text = normalize_thread(thread)
-            
-            # Traceability: Collect normalized conversations
-            conversations.append({"ts": ts, "text": conv_text})
-            
-            # Duplicate check
-            if ts in existing_conv_ids:
-                print(f"Skipping thread {ts} (already exists in artifacts).")
-                continue
 
-            classification = classify_conversation(conv_text)
-            
-            if classification and classification.get("type") != "IRRELEVANT":
-                create_artifact_from_classification(ts, classification)
-                artifacts_created += 1
+        use_case = self.build_ingest_threads_use_case()
+        result = use_case.execute(threads)
+        conversations = result.conversations
+        artifacts_created = result.artifacts_created
 
-        # Traceability: Save normalized conversations
-        save_json("conversations.json", {"conversations": conversations})
+        trace_use_case.execute(threads, conversations)
 
         if artifacts_created > 0:
             self.state_manager.set_state("ARTIFACTS PROCESSING")

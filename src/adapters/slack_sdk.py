@@ -1,0 +1,8 @@
+from __future__ import annotations
+
+from slack_reader import fetch_slack_threads
+
+
+class SlackSDKThreadsAdapter:
+    def fetch_threads(self, channel_id: str) -> list[dict]:
+        return fetch_slack_threads(channel_id)

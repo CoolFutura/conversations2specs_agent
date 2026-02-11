@@ -40,6 +40,9 @@ class ProposedUpdateRepository(Protocol):
     def create_from_artifact(self, artifact: Artifact) -> ProposedUpdate:
         ...
 
+    def delete_by_source_oq_id(self, oq_id: str) -> None:
+        ...
+
 
 class SpecUpdateRepository(Protocol):
     def save(self, spec_update: SpecUpdate) -> None:
