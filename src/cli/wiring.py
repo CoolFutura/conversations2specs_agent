@@ -12,7 +12,6 @@ from src.adapters.repo_json import (
 from src.adapters.slack_sdk import SlackSDKThreadsAdapter
 from src.adapters.trace_json import JsonTraceabilityAdapter
 from src.adapters.sources_state_json import JsonSourcesStateAdapter
-from src.use_cases.ingest_threads import IngestThreadsUseCase
 from src.use_cases.ingest import IngestUseCase
 from src.use_cases.transform_artifacts import TransformArtifactsUseCase
 from src.use_cases.transform_oq import TransformOQUseCase
@@ -25,11 +24,6 @@ from src.use_cases.list_open_questions import ListOpenQuestionsUseCase
 from src.use_cases.list_proposed_updates import ListProposedUpdatesUseCase
 from src.use_cases.init_sync import InitSyncUseCase
 
-
-def build_ingest_threads_use_case() -> IngestThreadsUseCase:
-    llm_classifier = OpenAILLMClassifier()
-    artifact_repo = JsonArtifactRepository()
-    return IngestThreadsUseCase(llm_classifier, artifact_repo, normalize_thread)
 
 def build_ingest_use_case() -> IngestUseCase:
     slack_adapter = SlackSDKThreadsAdapter()

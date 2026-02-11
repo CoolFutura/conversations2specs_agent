@@ -7,7 +7,6 @@ class WiringSmokeTests(unittest.TestCase):
     # Verifies that wiring can build all use cases without errors.
     def test_builds_all_use_cases(self):
         self.assertIsNotNone(wiring.build_ingest_use_case())
-        self.assertIsNotNone(wiring.build_ingest_threads_use_case())
         self.assertIsNotNone(wiring.build_transform_artifacts_use_case())
         self.assertIsNotNone(wiring.build_transform_oq_use_case())
         self.assertIsNotNone(wiring.build_approve_pu_use_case())
