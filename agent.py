@@ -25,6 +25,10 @@ from src.use_cases.transform_oq import TransformOQUseCase
 from src.use_cases.approve_pu import ApprovePUUseCase
 from src.use_cases.add_decision import AddDecisionUseCase
 from src.use_cases.modify_oq import ModifyOQUseCase
+from src.use_cases.change_artifact_status import ChangeArtifactStatusUseCase
+from src.use_cases.list_artifacts import ListArtifactsUseCase
+from src.use_cases.list_open_questions import ListOpenQuestionsUseCase
+from src.use_cases.list_proposed_updates import ListProposedUpdatesUseCase
 
 class SpecsUpdatesAgent:
     def __init__(self):
@@ -35,6 +39,22 @@ class SpecsUpdatesAgent:
         oq_repo = JsonOpenQuestionRepository()
         pu_repo = JsonProposedUpdateRepository()
         return TransformArtifactsUseCase(artifact_repo, oq_repo, pu_repo)
+
+    def build_change_artifact_status_use_case(self):
+        artifact_repo = JsonArtifactRepository()
+        return ChangeArtifactStatusUseCase(artifact_repo)
+
+    def build_list_artifacts_use_case(self):
+        artifact_repo = JsonArtifactRepository()
+        return ListArtifactsUseCase(artifact_repo)
+
+    def build_list_open_questions_use_case(self):
+        oq_repo = JsonOpenQuestionRepository()
+        return ListOpenQuestionsUseCase(oq_repo)
+
+    def build_list_proposed_updates_use_case(self):
+        pu_repo = JsonProposedUpdateRepository()
+        return ListProposedUpdatesUseCase(pu_repo)
 
     def build_ingest_threads_use_case(self):
         llm_classifier = OpenAILLMClassifier()
@@ -163,12 +183,13 @@ class SpecsUpdatesAgent:
 
     def cmd_change_status(self, args):
         print(f"Changing status of {args.artifact_id} to {args.status}...")
-        data = load_json("artifacts.json")
-        for art in data.get("artifacts", []):
-            if art["id"] == args.artifact_id:
-                art["status"] = args.status
-                break
-        save_json("artifacts.json", data)
+        use_case = self.build_change_artifact_status_use_case()
+        result = use_case.execute(args.artifact_id, args.status)
+
+        if not result.updated:
+            print(f"Artifact {args.artifact_id} not found.")
+            return
+
         print("Status updated.")
 
     def cmd_artifact_transform(self, args):
@@ -282,49 +303,49 @@ class SpecsUpdatesAgent:
         print("Future 'ingest' commands will only fetch messages from this point forward.")
 
     def cmd_art_list(self, args):
-        data = load_json("artifacts.json")
-        artifacts = data.get("artifacts", [])
+        use_case = self.build_list_artifacts_use_case()
+        artifacts = use_case.execute()
         if not artifacts:
             print("No artifacts found.")
             return
         print(f"{'ID':<15} {'Status':<15} {'Rephrasing'}")
         print("-" * 70)
         for art in artifacts:
-            rephrasing = art.get('rephrasing', 'N/A')
+            rephrasing = art.rephrasing or "N/A"
             if len(rephrasing) > 60:
                 rephrasing = rephrasing[:57] + "..."
-            print(f"{art['id']:<15} {art['status']:<15} {rephrasing}")
+            print(f"{art.id:<15} {art.status:<15} {rephrasing}")
 
     def cmd_oq_list(self, args):
-        data = load_json("open_questions.json")
-        questions = data.get("questions", [])
+        use_case = self.build_list_open_questions_use_case()
+        questions = use_case.execute()
         if not questions:
             print("No open questions found.")
             return
         print(f"{'ID':<25} {'Status':<15} {'Decided':<10} {'Question'}")
         print("-" * 95)
         for oq in questions:
-            question = oq.get('question', 'N/A')
+            question = oq.question or "N/A"
             if len(question) > 60:
                 question = question[:57] + "..."
-            decision = oq.get("decision")
-            rationale = oq.get("decision_rationale")
+            decision = oq.decision
+            rationale = oq.decision_rationale
             decided = "YES" if decision and rationale and str(decision).strip() and str(rationale).strip() else "NO"
-            print(f"{oq['id']:<25} {oq['status']:<15} {decided:<10} {question}")
+            print(f"{oq.id:<25} {oq.status:<15} {decided:<10} {question}")
 
     def cmd_pu_list(self, args):
-        data = load_json("proposed_updates.json")
-        updates = data.get("updates", [])
+        use_case = self.build_list_proposed_updates_use_case()
+        updates = use_case.execute()
         if not updates:
             print("No proposed updates found.")
             return
         print(f"{'ID':<25} {'Status':<15} {'Rephrasing'}")
         print("-" * 80)
         for pu in updates:
-            rephrasing = pu.get('rephrasing', 'N/A')
+            rephrasing = pu.rephrasing or "N/A"
             if len(rephrasing) > 60:
                 rephrasing = rephrasing[:57] + "..."
-            print(f"{pu['id']:<25} {pu['status']:<15} {rephrasing}")
+            print(f"{pu.id:<25} {pu.status:<15} {rephrasing}")
 
 if __name__ == "__main__":
     agent = SpecsUpdatesAgent()

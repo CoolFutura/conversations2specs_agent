@@ -13,6 +13,12 @@ class JsonArtifactRepository:
         artifacts = data.get("artifacts", [])
         return [self._from_dict(item) for item in artifacts]
 
+    def get_by_id(self, artifact_id: str) -> Artifact | None:
+        for artifact in self.list_all():
+            if artifact.id == artifact_id:
+                return artifact
+        return None
+
     def save(self, artifact: Artifact) -> None:
         data = load_json("artifacts.json")
         artifacts = data.get("artifacts", [])

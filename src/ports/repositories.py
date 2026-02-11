@@ -9,6 +9,9 @@ class ArtifactRepository(Protocol):
     def list_all(self) -> Iterable[Artifact]:
         ...
 
+    def get_by_id(self, artifact_id: str) -> Artifact | None:
+        ...
+
     def save(self, artifact: Artifact) -> None:
         ...
 
