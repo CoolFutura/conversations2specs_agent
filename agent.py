@@ -1,92 +1,31 @@
 import sys
 import argparse
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
 from state import StateManager
-from storage_utils import load_json, save_json
-from slack_reader import normalize_thread
-from src.adapters.slack_sdk import SlackSDKThreadsAdapter
-from src.adapters.trace_json import JsonTraceabilityAdapter
-from src.adapters.llm_openai import OpenAILLMClassifier
-from src.use_cases.ingest_threads import IngestThreadsUseCase
-from src.use_cases.fetch_threads import FetchThreadsUseCase
-from src.use_cases.trace_ingest import TraceIngestUseCase
-from src.adapters.repo_json import (
-    JsonArtifactRepository,
-    JsonOpenQuestionRepository,
-    JsonProposedUpdateRepository,
-    JsonSpecUpdateRepository,
+from src.cli.wiring import (
+    build_ingest_threads_use_case,
+    build_fetch_threads_use_case,
+    build_trace_ingest_use_case,
+    build_transform_artifacts_use_case,
+    build_transform_oq_use_case,
+    build_add_decision_use_case,
+    build_modify_oq_use_case,
+    build_approve_pu_use_case,
+    build_change_artifact_status_use_case,
+    build_list_artifacts_use_case,
+    build_list_open_questions_use_case,
+    build_list_proposed_updates_use_case,
+    build_init_sync_use_case,
 )
-from src.use_cases.transform_artifacts import TransformArtifactsUseCase
-from src.use_cases.transform_oq import TransformOQUseCase
-from src.use_cases.approve_pu import ApprovePUUseCase
-from src.use_cases.add_decision import AddDecisionUseCase
-from src.use_cases.modify_oq import ModifyOQUseCase
-from src.use_cases.change_artifact_status import ChangeArtifactStatusUseCase
-from src.use_cases.list_artifacts import ListArtifactsUseCase
-from src.use_cases.list_open_questions import ListOpenQuestionsUseCase
-from src.use_cases.list_proposed_updates import ListProposedUpdatesUseCase
 
 class SpecsUpdatesAgent:
     def __init__(self):
         self.state_manager = StateManager()
-
-    def build_transform_artifacts_use_case(self):
-        artifact_repo = JsonArtifactRepository()
-        oq_repo = JsonOpenQuestionRepository()
-        pu_repo = JsonProposedUpdateRepository()
-        return TransformArtifactsUseCase(artifact_repo, oq_repo, pu_repo)
-
-    def build_change_artifact_status_use_case(self):
-        artifact_repo = JsonArtifactRepository()
-        return ChangeArtifactStatusUseCase(artifact_repo)
-
-    def build_list_artifacts_use_case(self):
-        artifact_repo = JsonArtifactRepository()
-        return ListArtifactsUseCase(artifact_repo)
-
-    def build_list_open_questions_use_case(self):
-        oq_repo = JsonOpenQuestionRepository()
-        return ListOpenQuestionsUseCase(oq_repo)
-
-    def build_list_proposed_updates_use_case(self):
-        pu_repo = JsonProposedUpdateRepository()
-        return ListProposedUpdatesUseCase(pu_repo)
-
-    def build_ingest_threads_use_case(self):
-        llm_classifier = OpenAILLMClassifier()
-        artifact_repo = JsonArtifactRepository()
-        return IngestThreadsUseCase(llm_classifier, artifact_repo, normalize_thread)
-
-    def build_fetch_threads_use_case(self):
-        slack_adapter = SlackSDKThreadsAdapter()
-        return FetchThreadsUseCase(slack_adapter)
-
-    def build_trace_ingest_use_case(self):
-        trace_adapter = JsonTraceabilityAdapter()
-        return TraceIngestUseCase(trace_adapter)
-
-    def build_transform_oq_use_case(self):
-        oq_repo = JsonOpenQuestionRepository()
-        pu_repo = JsonProposedUpdateRepository()
-        return TransformOQUseCase(oq_repo, pu_repo)
-
-    def build_approve_pu_use_case(self):
-        pu_repo = JsonProposedUpdateRepository()
-        spec_repo = JsonSpecUpdateRepository()
-        return ApprovePUUseCase(pu_repo, spec_repo)
-
-    def build_add_decision_use_case(self):
-        oq_repo = JsonOpenQuestionRepository()
-        return AddDecisionUseCase(oq_repo)
-
-    def build_modify_oq_use_case(self):
-        oq_repo = JsonOpenQuestionRepository()
-        pu_repo = JsonProposedUpdateRepository()
-        return ModifyOQUseCase(oq_repo, pu_repo)
 
     def run(self):
         parser = argparse.ArgumentParser(description="Specs Updates Generator CLI")
@@ -155,18 +94,18 @@ class SpecsUpdatesAgent:
         channel_id = args.channel
         print(f"Ingesting Slack threads from {channel_id}...")
         
-        fetch_use_case = self.build_fetch_threads_use_case()
+        fetch_use_case = build_fetch_threads_use_case()
         threads = fetch_use_case.execute(channel_id).threads
         if not threads:
             print("No new threads found.")
             return
 
         # Traceability: Save raw threads + normalized conversations
-        trace_use_case = self.build_trace_ingest_use_case()
+        trace_use_case = build_trace_ingest_use_case()
         
         self.state_manager.start_run()
 
-        use_case = self.build_ingest_threads_use_case()
+        use_case = build_ingest_threads_use_case()
         result = use_case.execute(threads)
         conversations = result.conversations
         artifacts_created = result.artifacts_created
@@ -183,7 +122,7 @@ class SpecsUpdatesAgent:
 
     def cmd_change_status(self, args):
         print(f"Changing status of {args.artifact_id} to {args.status}...")
-        use_case = self.build_change_artifact_status_use_case()
+        use_case = build_change_artifact_status_use_case()
         result = use_case.execute(args.artifact_id, args.status)
 
         if not result.updated:
@@ -194,7 +133,7 @@ class SpecsUpdatesAgent:
 
     def cmd_artifact_transform(self, args):
         print("Transforming artifacts...")
-        use_case = self.build_transform_artifacts_use_case()
+        use_case = build_transform_artifacts_use_case()
 
         oq_count, pu_count = use_case.execute()
         print(f"Created {oq_count} Open Questions and {pu_count} Proposed Updates.")
@@ -211,7 +150,7 @@ class SpecsUpdatesAgent:
 
     def cmd_oq_transform(self, args):
         print("Transforming decided OQs to PUs...")
-        use_case = self.build_transform_oq_use_case()
+        use_case = build_transform_oq_use_case()
         result = use_case.execute()
 
         print(f"Created {result.transformed_count} Proposed Updates.")
@@ -224,7 +163,7 @@ class SpecsUpdatesAgent:
         decision = input("Enter the decision for this OQ: ")
         rationale = input("Enter the rationale: ")
 
-        use_case = self.build_add_decision_use_case()
+        use_case = build_add_decision_use_case()
         result = use_case.execute(args.oq_id, decision, rationale)
 
         if not result.updated:
@@ -235,7 +174,7 @@ class SpecsUpdatesAgent:
 
     def cmd_approve_pu(self, args):
         print(f"Approving PU {args.pu_id}...")
-        use_case = self.build_approve_pu_use_case()
+        use_case = build_approve_pu_use_case()
         result = use_case.execute(args.pu_id)
 
         if not result.spec_update:
@@ -278,7 +217,7 @@ class SpecsUpdatesAgent:
             print("No changes made.")
             return
 
-        use_case = self.build_modify_oq_use_case()
+        use_case = build_modify_oq_use_case()
         result = use_case.execute(args.oq_id, **updates)
 
         if not result.updated:
@@ -289,21 +228,16 @@ class SpecsUpdatesAgent:
 
     def cmd_init_sync(self, args):
         channel_id = args.channel or os.getenv("SLACK_CHANNEL_ID", "general")
-        import time
         current_ts = str(time.time())
-        
-        sources_state = load_json("sources_state.json")
-        if "slack" not in sources_state:
-            sources_state["slack"] = {}
-        
-        sources_state["slack"][channel_id] = {"last_ts": current_ts}
-        save_json("sources_state.json", sources_state)
+
+        use_case = build_init_sync_use_case()
+        use_case.execute(channel_id, current_ts)
         
         print(f"Sync initialized for channel {channel_id} at timestamp {current_ts}.")
         print("Future 'ingest' commands will only fetch messages from this point forward.")
 
     def cmd_art_list(self, args):
-        use_case = self.build_list_artifacts_use_case()
+        use_case = build_list_artifacts_use_case()
         artifacts = use_case.execute()
         if not artifacts:
             print("No artifacts found.")
@@ -317,7 +251,7 @@ class SpecsUpdatesAgent:
             print(f"{art.id:<15} {art.status:<15} {rephrasing}")
 
     def cmd_oq_list(self, args):
-        use_case = self.build_list_open_questions_use_case()
+        use_case = build_list_open_questions_use_case()
         questions = use_case.execute()
         if not questions:
             print("No open questions found.")
@@ -334,7 +268,7 @@ class SpecsUpdatesAgent:
             print(f"{oq.id:<25} {oq.status:<15} {decided:<10} {question}")
 
     def cmd_pu_list(self, args):
-        use_case = self.build_list_proposed_updates_use_case()
+        use_case = build_list_proposed_updates_use_case()
         updates = use_case.execute()
         if not updates:
             print("No proposed updates found.")
