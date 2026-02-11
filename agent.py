@@ -8,9 +8,7 @@ load_dotenv(override=True)
 
 from state import StateManager
 from src.cli.wiring import (
-    build_ingest_threads_use_case,
-    build_fetch_threads_use_case,
-    build_trace_ingest_use_case,
+    build_ingest_use_case,
     build_transform_artifacts_use_case,
     build_transform_oq_use_case,
     build_add_decision_use_case,
@@ -94,23 +92,12 @@ class SpecsUpdatesAgent:
         channel_id = args.channel
         print(f"Ingesting Slack threads from {channel_id}...")
         
-        fetch_use_case = build_fetch_threads_use_case()
-        threads = fetch_use_case.execute(channel_id).threads
-        if not threads:
+        ingest_use_case = build_ingest_use_case()
+        result = ingest_use_case.execute(channel_id, on_start_run=self.state_manager.start_run)
+        if result.threads_fetched == 0:
             print("No new threads found.")
             return
-
-        # Traceability: Save raw threads + normalized conversations
-        trace_use_case = build_trace_ingest_use_case()
-        
-        self.state_manager.start_run()
-
-        use_case = build_ingest_threads_use_case()
-        result = use_case.execute(threads)
-        conversations = result.conversations
         artifacts_created = result.artifacts_created
-
-        trace_use_case.execute(threads, conversations)
 
         if artifacts_created > 0:
             self.state_manager.set_state("ARTIFACTS PROCESSING")
