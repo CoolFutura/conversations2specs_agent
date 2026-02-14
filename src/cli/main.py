@@ -14,6 +14,7 @@ from src.cli.wiring import (
     build_modify_oq_use_case,
     build_approve_pu_use_case,
     build_change_artifact_status_use_case,
+    build_change_artifact_status_batch_use_case,
     build_list_artifacts_use_case,
     build_list_open_questions_use_case,
     build_list_proposed_updates_use_case,
@@ -33,9 +34,9 @@ class SpecsUpdatesAgent:
         ingest_parser.add_argument("--channel", default=os.getenv("SLACK_CHANNEL_ID", "general"), help="Slack channel ID to ingest from (defaults to SLACK_CHANNEL_ID in .env or 'general')")
         
         # Command: change_status
-        status_parser = subparsers.add_parser("change_status", help="Change status of an artifact")
-        status_parser.add_argument("artifact_id", help="Artifact ID")
-        status_parser.add_argument("status", choices=["OQ", "PU", "IRRELEVANT"], help="New status")
+        status_parser = subparsers.add_parser("change_status", help="Change status of one or more artifacts")
+        status_parser.add_argument("artifact_ids", nargs="+", help="Artifact IDs (or IDs followed by status)")
+        status_parser.add_argument("--status", choices=["OQ", "PU", "IRRELEVANT"], help="New status")
 
         # Command: artifact_transform
         subparsers.add_parser("artifact_transform", help="Transform artifacts into OQ or PU")
@@ -101,15 +102,30 @@ class SpecsUpdatesAgent:
             print("No new relevant artifacts found in the ingested threads.")
 
     def cmd_change_status(self, args):
-        print(f"Changing status of {args.artifact_id} to {args.status}...")
-        use_case = build_change_artifact_status_use_case()
-        result = use_case.execute(args.artifact_id, args.status)
+        status_choices = {"OQ", "PU", "IRRELEVANT"}
+        status = args.status
+        artifact_ids = list(args.artifact_ids)
 
-        if not result.updated:
-            print(f"Artifact {args.artifact_id} not found.")
+        if status is None:
+            if not artifact_ids or artifact_ids[-1] not in status_choices:
+                print("Missing status. Provide --status or pass status as the last argument.")
+                return
+            status = artifact_ids[-1]
+            artifact_ids = artifact_ids[:-1]
+
+        if not artifact_ids:
+            print("No artifact IDs provided.")
             return
 
-        print("Status updated.")
+        print(f"Changing status of {len(artifact_ids)} artifact(s) to {status}...")
+        use_case = build_change_artifact_status_batch_use_case()
+        result = use_case.execute(artifact_ids, status)
+
+        if result.missing_ids:
+            print(f"Not found: {', '.join(result.missing_ids)}")
+
+        if result.updated_ids:
+            print(f"Updated: {', '.join(result.updated_ids)}")
 
     def cmd_artifact_transform(self, args):
         print("Transforming artifacts...")

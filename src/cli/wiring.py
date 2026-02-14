@@ -18,7 +18,10 @@ from src.use_cases.transform_oq import TransformOQUseCase
 from src.use_cases.approve_pu import ApprovePUUseCase
 from src.use_cases.add_decision import AddDecisionUseCase
 from src.use_cases.modify_oq import ModifyOQUseCase
-from src.use_cases.change_artifact_status import ChangeArtifactStatusUseCase
+from src.use_cases.change_artifact_status import (
+    ChangeArtifactStatusUseCase,
+    ChangeArtifactStatusBatchUseCase,
+)
 from src.use_cases.list_artifacts import ListArtifactsUseCase
 from src.use_cases.list_open_questions import ListOpenQuestionsUseCase
 from src.use_cases.list_proposed_updates import ListProposedUpdatesUseCase
@@ -66,6 +69,11 @@ def build_modify_oq_use_case() -> ModifyOQUseCase:
 def build_change_artifact_status_use_case() -> ChangeArtifactStatusUseCase:
     artifact_repo = JsonArtifactRepository()
     return ChangeArtifactStatusUseCase(artifact_repo)
+
+
+def build_change_artifact_status_batch_use_case() -> ChangeArtifactStatusBatchUseCase:
+    artifact_repo = JsonArtifactRepository()
+    return ChangeArtifactStatusBatchUseCase(artifact_repo)
 
 
 def build_list_artifacts_use_case() -> ListArtifactsUseCase:

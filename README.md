@@ -39,7 +39,8 @@ A CLI tool to automatically process Slack discussions and generate specification
 - `python agent.py oq_modify <oq_id>` - Modify fields of an OQ (question/context/decision/rationale)
 - `python agent.py oq_transform` - Convert decided OQs to PUs (batch)
 - `python agent.py approve_pu <pu_id>` - Approve a proposed update
-- `python agent.py change_status <artifact_id> <status>` - Manually change artifact status
+- `python agent.py change_status <id1> <id2> ... <status>` - Change status for one or more artifacts
+- `python agent.py change_status --status <status> <id1> <id2> ...` - Alternative syntax
 - `python agent.py init_sync` - Initialize sync timestamp (skip history)
 
 ### Tests

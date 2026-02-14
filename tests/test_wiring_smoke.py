@@ -13,6 +13,7 @@ class WiringSmokeTests(unittest.TestCase):
         self.assertIsNotNone(wiring.build_add_decision_use_case())
         self.assertIsNotNone(wiring.build_modify_oq_use_case())
         self.assertIsNotNone(wiring.build_change_artifact_status_use_case())
+        self.assertIsNotNone(wiring.build_change_artifact_status_batch_use_case())
         self.assertIsNotNone(wiring.build_list_artifacts_use_case())
         self.assertIsNotNone(wiring.build_list_open_questions_use_case())
         self.assertIsNotNone(wiring.build_list_proposed_updates_use_case())
