@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from slack_reader import fetch_slack_threads
+from src.adapters.slack_reader import fetch_slack_threads
 
 
 class SlackSDKThreadsAdapter:

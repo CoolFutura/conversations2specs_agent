@@ -6,7 +6,6 @@ A CLI tool to automatically process Slack discussions and generate specification
 
 - **Slack Integration**: Fetch and normalize Slack threads
 - **AI Classification**: Automatically classify discussions as Open Questions (OQ) or Proposed Updates (PU)
-- **State Management**: Track progress through a defined workflow
 - **Traceability**: Full audit trail of all processed data
 
 ## Setup
@@ -36,9 +35,16 @@ A CLI tool to automatically process Slack discussions and generate specification
 - `python agent.py oq_list` - List all open questions
 - `python agent.py pu_list` - List all proposed updates
 - `python agent.py artifact_transform` - Transform artifacts to OQ/PU
-- `python agent.py oq_transform <oq_id>` - Convert OQ to PU with decision
+- `python agent.py oq_decide <oq_id>` - Add decision + rationale to an OQ
+- `python agent.py oq_modify <oq_id>` - Modify fields of an OQ (question/context/decision/rationale)
+- `python agent.py oq_transform` - Convert decided OQs to PUs (batch)
 - `python agent.py approve_pu <pu_id>` - Approve a proposed update
 - `python agent.py change_status <artifact_id> <status>` - Manually change artifact status
+- `python agent.py init_sync` - Initialize sync timestamp (skip history)
+
+### Tests
+
+- `make test` - Run all tests
 
 ## Workflow
 
@@ -56,6 +62,26 @@ All data is stored in `data/` directory:
 - `specs_updates.json` - Approved specification changes
 - `slack_threads.json` - Raw Slack data (traceability)
 - `conversations.json` - Normalized conversations (traceability)
+
+## Architecture Overview (Hexagonal)
+
+This project follows a hexagonal (ports & adapters) structure:
+
+- `src/domain/` - Core business models (Artifacts, OQ, PU, SpecUpdate)
+- `src/ports/` - Interfaces (repositories, Slack, LLM, traceability)
+- `src/use_cases/` - Business logic (ingest, transform, approve, modify)
+- `src/adapters/` - Concrete implementations (JSON storage, Slack SDK, OpenAI)
+- `src/cli/wiring.py` - Centralized wiring of use cases + adapters
+- `agent.py` - Thin CLI entrypoint that calls use cases
+
+```mermaid
+flowchart LR
+    CLI["CLI (agent.py)"] --> UC["Use Cases (src/use_cases)"]
+    UC --> PORTS["Ports (src/ports)"]
+    PORTS --> ADAPT["Adapters (src/adapters)"]
+    ADAPT --> DATA["Data (JSON files)"]
+    ADAPT --> EXT["External APIs (Slack/OpenAI)"]
+```
 
 ## License
 

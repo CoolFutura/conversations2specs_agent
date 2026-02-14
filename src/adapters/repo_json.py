@@ -4,7 +4,7 @@ import uuid
 from typing import Iterable
 
 from src.domain.models import Artifact, ArtifactType, OpenQuestion, ProposedUpdate, SpecUpdate
-from storage_utils import load_json, save_json
+from src.adapters.storage_utils import load_json, save_json
 
 
 class JsonArtifactRepository:

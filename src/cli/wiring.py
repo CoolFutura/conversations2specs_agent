@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from slack_reader import normalize_thread
+from src.adapters.slack_reader import normalize_thread
 
-from src.adapters.llm_openai import OpenAILLMClassifier
+from src.adapters.openai import OpenAILLMClassifier
 from src.adapters.repo_json import (
     JsonArtifactRepository,
     JsonOpenQuestionRepository,

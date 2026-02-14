@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from storage_utils import save_json
+from src.adapters.storage_utils import save_json
 
 
 class JsonTraceabilityAdapter:

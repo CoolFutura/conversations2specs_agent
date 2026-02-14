@@ -2,7 +2,7 @@ import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from dotenv import load_dotenv
-from storage_utils import load_json, save_json
+from src.adapters.storage_utils import load_json, save_json
 
 load_dotenv(override=True)
 
