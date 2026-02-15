@@ -88,6 +88,13 @@ class JsonOpenQuestionRepository:
         data["questions"] = questions
         save_json("open_questions.json", data)
 
+    def delete_by_id(self, oq_id: str) -> None:
+        data = load_json("open_questions.json")
+        questions = data.get("questions", [])
+        questions = [item for item in questions if item.get("id") != oq_id]
+        data["questions"] = questions
+        save_json("open_questions.json", data)
+
     def create_from_artifact(self, artifact: Artifact) -> OpenQuestion:
         oq = OpenQuestion(
             id=f"oq_{uuid.uuid4().hex[:8]}",

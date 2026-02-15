@@ -29,6 +29,9 @@ class OpenQuestionRepository(Protocol):
     def create_from_artifact(self, artifact: Artifact) -> OpenQuestion:
         ...
 
+    def delete_by_id(self, oq_id: str) -> None:
+        ...
+
 
 class ProposedUpdateRepository(Protocol):
     def list_all(self) -> Iterable[ProposedUpdate]:

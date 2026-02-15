@@ -20,6 +20,8 @@ from src.cli.wiring import (
     build_list_proposed_updates_use_case,
     build_init_sync_use_case,
     build_reset_data_use_case,
+    build_set_last_ts_use_case,
+    build_delete_oq_use_case,
 )
 
 class SpecsUpdatesAgent:
@@ -53,6 +55,11 @@ class SpecsUpdatesAgent:
         # Command: oq_transform
         subparsers.add_parser("oq_transform", help="Transform decided OQs into PUs")
 
+        # Command: oq_delete
+        oq_delete_parser = subparsers.add_parser("oq_delete", help="Delete an OQ and mark its artifact IRRELEVANT")
+        oq_delete_parser.add_argument("oq_id", help="OQ ID")
+        oq_delete_parser.add_argument("--yes", action="store_true", help="Confirm delete without prompt")
+
         # Command: approve_pu
         pu_app_parser = subparsers.add_parser("approve_pu", help="Approve a Proposed Update")
         pu_app_parser.add_argument("pu_id", help="PU ID")
@@ -60,6 +67,11 @@ class SpecsUpdatesAgent:
         # Command: init_sync
         init_parser = subparsers.add_parser("init_sync", help="Initialize the sync timestamp to current time to skip history")
         init_parser.add_argument("--channel", help="Specific channel ID to initialize (optional, uses .env or --channel)")
+
+        # Command: set_last_ts
+        set_ts_parser = subparsers.add_parser("set_last_ts", help="Set last_ts by days back from now")
+        set_ts_parser.add_argument("--channel", help="Specific channel ID to set (optional, uses .env or --channel)")
+        set_ts_parser.add_argument("--days", type=float, help="Number of days back (e.g. 3)")
 
         # Command: reset_data
         reset_parser = subparsers.add_parser("reset_data", help="Reset stored JSON data")
@@ -102,9 +114,13 @@ class SpecsUpdatesAgent:
         artifacts_created = result.artifacts_created
 
         if artifacts_created > 0:
-            print(f"Successfully created {artifacts_created} new artifacts.")
+            print(
+                "Successfully created "
+                f"{artifacts_created} new artifacts "
+                f"(OQ: {result.oq_count}, PU: {result.pu_count}, IRRELEVANT: {result.irrelevant_count})."
+            )
         else:
-            print("No new relevant artifacts found in the ingested threads.")
+            print("No new artifacts found in the ingested threads.")
 
     def cmd_change_status(self, args):
         status_choices = {"OQ", "PU", "IRRELEVANT"}
@@ -161,6 +177,21 @@ class SpecsUpdatesAgent:
             return
 
         print(f"Decision saved for OQ {args.oq_id}.")
+
+    def cmd_oq_delete(self, args):
+        if not args.yes:
+            confirm = input(f"Delete OQ {args.oq_id} and mark its artifact IRRELEVANT? (y/n): ").strip().lower()
+            if confirm not in {"y", "yes"}:
+                print("Delete cancelled.")
+                return
+
+        use_case = build_delete_oq_use_case()
+        result = use_case.execute(args.oq_id)
+        if not result.deleted:
+            print(f"OQ {args.oq_id} not found.")
+            return
+
+        print(f"OQ {args.oq_id} deleted.")
 
     def cmd_approve_pu(self, args):
         print(f"Approving PU {args.pu_id}...")
@@ -224,6 +255,25 @@ class SpecsUpdatesAgent:
         
         print(f"Sync initialized for channel {channel_id} at timestamp {current_ts}.")
         print("Future 'ingest' commands will only fetch messages from this point forward.")
+
+    def cmd_set_last_ts(self, args):
+        channel_id = args.channel or os.getenv("SLACK_CHANNEL_ID", "general")
+        days = args.days
+        if days is None:
+            raw = input("Enter number of days back (e.g. 3): ").strip()
+            try:
+                days = float(raw)
+            except ValueError:
+                print("Invalid number of days.")
+                return
+
+        if days < 0:
+            print("Days must be a non-negative number.")
+            return
+
+        use_case = build_set_last_ts_use_case()
+        result = use_case.execute(channel_id, days)
+        print(f"Set last_ts for channel {channel_id} to {result.last_ts}.")
 
     def cmd_art_list(self, args):
         use_case = build_list_artifacts_use_case()

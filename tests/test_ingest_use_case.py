@@ -90,6 +90,9 @@ class IngestUseCaseTests(unittest.TestCase):
 
         self.assertEqual(result.threads_fetched, 2)
         self.assertEqual(result.artifacts_created, 2)
+        self.assertEqual(result.oq_count, 2)
+        self.assertEqual(result.pu_count, 0)
+        self.assertEqual(result.irrelevant_count, 0)
         self.assertEqual(started["count"], 1)
         self.assertEqual(trace.threads, threads)
         self.assertEqual(len(trace.conversations), 2)
@@ -111,6 +114,9 @@ class IngestUseCaseTests(unittest.TestCase):
 
         self.assertEqual(result.threads_fetched, 0)
         self.assertEqual(result.artifacts_created, 0)
+        self.assertEqual(result.oq_count, 0)
+        self.assertEqual(result.pu_count, 0)
+        self.assertEqual(result.irrelevant_count, 0)
         self.assertEqual(started["count"], 0)
         self.assertEqual(slack.calls, ["C_EMPTY"])
         self.assertEqual(len(llm.calls), 0)
