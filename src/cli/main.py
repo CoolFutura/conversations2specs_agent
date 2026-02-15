@@ -19,6 +19,7 @@ from src.cli.wiring import (
     build_list_open_questions_use_case,
     build_list_proposed_updates_use_case,
     build_init_sync_use_case,
+    build_reset_data_use_case,
 )
 
 class SpecsUpdatesAgent:
@@ -59,6 +60,10 @@ class SpecsUpdatesAgent:
         # Command: init_sync
         init_parser = subparsers.add_parser("init_sync", help="Initialize the sync timestamp to current time to skip history")
         init_parser.add_argument("--channel", help="Specific channel ID to initialize (optional, uses .env or --channel)")
+
+        # Command: reset_data
+        reset_parser = subparsers.add_parser("reset_data", help="Reset stored JSON data")
+        reset_parser.add_argument("--yes", action="store_true", help="Confirm reset without prompt")
 
         # Command: art_list
         subparsers.add_parser("art_list", help="List all artifacts")
@@ -265,6 +270,18 @@ class SpecsUpdatesAgent:
             if len(rephrasing) > 60:
                 rephrasing = rephrasing[:57] + "..."
             print(f"{pu.id:<25} {pu.status:<15} {rephrasing}")
+
+    def cmd_reset_data(self, args):
+        if not args.yes:
+            confirm = input("This will clear all data JSON files. Continue? (y/n): ").strip().lower()
+            if confirm not in {"y", "yes"}:
+                print("Reset cancelled.")
+                return
+
+        use_case = build_reset_data_use_case()
+        result = use_case.execute()
+        if result.success:
+            print("Data reset completed.")
 
 def main():
     agent = SpecsUpdatesAgent()

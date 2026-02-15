@@ -42,6 +42,8 @@ A CLI tool to automatically process Slack discussions and generate specification
 - `python agent.py change_status <id1> <id2> ... <status>` - Change status for one or more artifacts
 - `python agent.py change_status --status <status> <id1> <id2> ...` - Alternative syntax
 - `python agent.py init_sync` - Initialize sync timestamp (skip history)
+- `python agent.py reset_data` - Clear all stored JSON data (asks for confirmation)
+- `python agent.py reset_data --yes` - Clear data without prompt
 
 ### Tests
 

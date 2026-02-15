@@ -18,6 +18,7 @@ class WiringSmokeTests(unittest.TestCase):
         self.assertIsNotNone(wiring.build_list_open_questions_use_case())
         self.assertIsNotNone(wiring.build_list_proposed_updates_use_case())
         self.assertIsNotNone(wiring.build_init_sync_use_case())
+        self.assertIsNotNone(wiring.build_reset_data_use_case())
 
 
 if __name__ == "__main__":
