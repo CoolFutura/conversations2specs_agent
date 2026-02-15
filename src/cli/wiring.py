@@ -29,7 +29,7 @@ from src.use_cases.list_proposed_updates import ListProposedUpdatesUseCase
 from src.use_cases.init_sync import InitSyncUseCase
 from src.use_cases.reset_data import ResetDataUseCase
 from src.use_cases.set_last_ts import SetLastTsUseCase
-from src.use_cases.delete_oq import DeleteOQUseCase
+from src.use_cases.delete_oq import DeleteOQUseCase, DeleteOQBatchUseCase
 
 
 def build_ingest_use_case() -> IngestUseCase:
@@ -115,3 +115,10 @@ def build_delete_oq_use_case() -> DeleteOQUseCase:
     artifact_repo = JsonArtifactRepository()
     pu_repo = JsonProposedUpdateRepository()
     return DeleteOQUseCase(oq_repo, artifact_repo, pu_repo)
+
+
+def build_delete_oq_batch_use_case() -> DeleteOQBatchUseCase:
+    oq_repo = JsonOpenQuestionRepository()
+    artifact_repo = JsonArtifactRepository()
+    pu_repo = JsonProposedUpdateRepository()
+    return DeleteOQBatchUseCase(oq_repo, artifact_repo, pu_repo)

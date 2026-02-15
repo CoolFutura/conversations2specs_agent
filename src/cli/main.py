@@ -22,6 +22,7 @@ from src.cli.wiring import (
     build_reset_data_use_case,
     build_set_last_ts_use_case,
     build_delete_oq_use_case,
+    build_delete_oq_batch_use_case,
 )
 
 class SpecsUpdatesAgent:
@@ -56,8 +57,8 @@ class SpecsUpdatesAgent:
         subparsers.add_parser("oq_transform", help="Transform decided OQs into PUs")
 
         # Command: oq_delete
-        oq_delete_parser = subparsers.add_parser("oq_delete", help="Delete an OQ and mark its artifact IRRELEVANT")
-        oq_delete_parser.add_argument("oq_id", help="OQ ID")
+        oq_delete_parser = subparsers.add_parser("oq_delete", help="Delete one or more OQs and mark artifacts IRRELEVANT")
+        oq_delete_parser.add_argument("oq_ids", nargs="+", help="OQ IDs")
         oq_delete_parser.add_argument("--yes", action="store_true", help="Confirm delete without prompt")
 
         # Command: approve_pu
@@ -179,19 +180,28 @@ class SpecsUpdatesAgent:
         print(f"Decision saved for OQ {args.oq_id}.")
 
     def cmd_oq_delete(self, args):
+        oq_ids = list(args.oq_ids)
+        if not oq_ids:
+            print("No OQ IDs provided.")
+            return
+
         if not args.yes:
-            confirm = input(f"Delete OQ {args.oq_id} and mark its artifact IRRELEVANT? (y/n): ").strip().lower()
+            plural = "s" if len(oq_ids) > 1 else ""
+            confirm = input(
+                f"Delete {len(oq_ids)} OQ{plural} and mark artifact(s) IRRELEVANT? (y/n): "
+            ).strip().lower()
             if confirm not in {"y", "yes"}:
                 print("Delete cancelled.")
                 return
 
-        use_case = build_delete_oq_use_case()
-        result = use_case.execute(args.oq_id)
-        if not result.deleted:
-            print(f"OQ {args.oq_id} not found.")
-            return
+        use_case = build_delete_oq_batch_use_case()
+        result = use_case.execute(oq_ids)
 
-        print(f"OQ {args.oq_id} deleted.")
+        if result.missing_ids:
+            print(f"Not found: {', '.join(result.missing_ids)}")
+
+        if result.deleted_ids:
+            print(f"Deleted: {', '.join(result.deleted_ids)}")
 
     def cmd_approve_pu(self, args):
         print(f"Approving PU {args.pu_id}...")

@@ -1,7 +1,7 @@
 import unittest
 
 from src.domain.models import Artifact, ArtifactType, OpenQuestion, ProposedUpdate
-from src.use_cases.delete_oq import DeleteOQUseCase
+from src.use_cases.delete_oq import DeleteOQUseCase, DeleteOQBatchUseCase
 
 
 class FakeArtifactRepo:
@@ -123,6 +123,61 @@ class DeleteOQUseCaseTests(unittest.TestCase):
 
         self.assertFalse(result.deleted)
         self.assertIsNone(result.artifact_id)
+
+
+class DeleteOQBatchUseCaseTests(unittest.TestCase):
+    # Verifies that batch delete handles deleted and missing IDs.
+    def test_batch_delete(self):
+        artifact1 = Artifact(
+            id="art_1",
+            conversation_id="c1",
+            type=ArtifactType.OQ,
+            status="PENDING",
+            rephrasing="",
+            rationale="",
+            summary_of_context="",
+        )
+        artifact2 = Artifact(
+            id="art_2",
+            conversation_id="c2",
+            type=ArtifactType.OQ,
+            status="PENDING",
+            rephrasing="",
+            rationale="",
+            summary_of_context="",
+        )
+        oq1 = OpenQuestion(
+            id="oq_1",
+            artifact_id="art_1",
+            question="Q1",
+            context="ctx",
+            status="OPEN",
+            slack_ts=None,
+            decision=None,
+            decision_rationale=None,
+        )
+        oq2 = OpenQuestion(
+            id="oq_2",
+            artifact_id="art_2",
+            question="Q2",
+            context="ctx",
+            status="OPEN",
+            slack_ts=None,
+            decision=None,
+            decision_rationale=None,
+        )
+
+        oq_repo = FakeOQRepo([oq1, oq2])
+        artifact_repo = FakeArtifactRepo([artifact1, artifact2])
+        pu_repo = FakePURepo([])
+
+        use_case = DeleteOQBatchUseCase(oq_repo, artifact_repo, pu_repo)
+        result = use_case.execute(["oq_1", "missing", "oq_2"])
+
+        self.assertEqual(set(result.deleted_ids), {"oq_1", "oq_2"})
+        self.assertEqual(result.missing_ids, ["missing"])
+        self.assertEqual(artifact_repo.get_by_id("art_1").status, "IRRELEVANT")
+        self.assertEqual(artifact_repo.get_by_id("art_2").status, "IRRELEVANT")
 
 
 if __name__ == "__main__":
