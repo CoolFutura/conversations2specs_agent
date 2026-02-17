@@ -52,7 +52,7 @@ class FakePURepo:
 
 # Verifies that ModifyOQUseCase updates fields and normalizes status.
 class ModifyOQUseCaseTests(unittest.TestCase):
-    def test_updates_fields_and_sets_decided_when_complete(self):
+    def test_updates_fields_and_sets_open(self):
         oq = OpenQuestion(
             id="oq_1",
             artifact_id="art_1",
@@ -82,7 +82,8 @@ class ModifyOQUseCaseTests(unittest.TestCase):
         self.assertEqual(result.oq.context, "New context")
         self.assertEqual(result.oq.decision, "DECISION")
         self.assertEqual(result.oq.decision_rationale, "WHY")
-        self.assertEqual(result.oq.status, "DECIDED")
+        self.assertEqual(result.oq.status, "OPEN")
+        self.assertIsNotNone(result.oq.last_modified_at)
 
     def test_sets_open_when_decision_incomplete(self):
         oq = OpenQuestion(
@@ -120,7 +121,7 @@ class ModifyOQUseCaseTests(unittest.TestCase):
         self.assertFalse(result.updated)
         self.assertIsNone(result.oq)
 
-    def test_decided_oq_deletes_old_pu_and_recreates_new_one(self):
+    def test_decided_oq_deletes_old_pu_without_recreating(self):
         oq = OpenQuestion(
             id="oq_3",
             artifact_id="art_3",
@@ -150,38 +151,7 @@ class ModifyOQUseCaseTests(unittest.TestCase):
 
         self.assertTrue(result.updated)
         self.assertIn("oq_3", pu_repo.deleted_source_ids)
-        self.assertEqual(len(pu_repo.saved), 1)
-        new_pu = pu_repo.saved[0]
-        self.assertEqual(new_pu.source_oq_id, "oq_3")
-        self.assertEqual(new_pu.context, "new ctx")
-
-    def test_open_oq_becomes_decided_and_creates_pu(self):
-        oq = OpenQuestion(
-            id="oq_4",
-            artifact_id="art_4",
-            question="Q4",
-            context="ctx",
-            status="OPEN",
-            slack_ts=None,
-            decision=None,
-            decision_rationale=None,
-        )
-
-        oq_repo = FakeOQRepo([oq])
-        pu_repo = FakePURepo()
-        use_case = ModifyOQUseCase(oq_repo, pu_repo)
-
-        result = use_case.execute(
-            "oq_4",
-            decision="DECISION",
-            decision_rationale="WHY",
-        )
-
-        self.assertTrue(result.updated)
-        self.assertEqual(result.oq.status, "DECIDED")
-        self.assertEqual(len(pu_repo.saved), 1)
-        new_pu = pu_repo.saved[0]
-        self.assertEqual(new_pu.source_oq_id, "oq_4")
+        self.assertEqual(len(pu_repo.saved), 0)
 
 
 if __name__ == "__main__":

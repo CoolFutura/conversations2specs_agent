@@ -40,6 +40,7 @@ A CLI tool to automatically process Slack discussions and generate specification
 - `python agent.py oq_transform` - Convert decided OQs to PUs (batch)
 - `python agent.py oq_delete <oq_id>` - Delete an OQ and mark its artifact IRRELEVANT
 - `python agent.py oq_delete <id1> <id2> ...` - Batch delete OQs
+- `python agent.py publish_oq <id1> <id2> ...` - Publish OQs to Slack (republish only if modified)
 - `python agent.py approve_pu <pu_id>` - Approve a proposed update
 - `python agent.py change_status <id1> <id2> ... <status>` - Change status for one or more artifacts
 - `python agent.py change_status --status <status> <id1> <id2> ...` - Alternative syntax
@@ -47,6 +48,18 @@ A CLI tool to automatically process Slack discussions and generate specification
 - `python agent.py set_last_ts --days <n>` - Set last_ts to N days back (asks if missing)
 - `python agent.py reset_data` - Clear all stored JSON data (asks for confirmation)
 - `python agent.py reset_data --yes` - Clear data without prompt
+
+### UI (Desktop)
+
+1. Install UI dependency:
+   ```bash
+   pip install pyside6
+   ```
+
+2. Launch the UI from the project root:
+   ```bash
+   python ui.py
+   ```
 
 ### Tests
 

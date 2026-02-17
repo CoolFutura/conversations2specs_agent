@@ -13,6 +13,7 @@ from src.adapters.slack_sdk import SlackSDKThreadsAdapter
 from src.adapters.trace_json import JsonTraceabilityAdapter
 from src.adapters.sources_state_json import JsonSourcesStateAdapter
 from src.adapters.data_reset_json import JsonDataResetAdapter
+from src.adapters.slack_publish import SlackSDKPublishAdapter
 from src.use_cases.ingest import IngestUseCase
 from src.use_cases.transform_artifacts import TransformArtifactsUseCase
 from src.use_cases.transform_oq import TransformOQUseCase
@@ -30,6 +31,7 @@ from src.use_cases.init_sync import InitSyncUseCase
 from src.use_cases.reset_data import ResetDataUseCase
 from src.use_cases.set_last_ts import SetLastTsUseCase
 from src.use_cases.delete_oq import DeleteOQUseCase, DeleteOQBatchUseCase
+from src.use_cases.publish_oq import PublishOQsUseCase
 
 
 def build_ingest_use_case() -> IngestUseCase:
@@ -122,3 +124,9 @@ def build_delete_oq_batch_use_case() -> DeleteOQBatchUseCase:
     artifact_repo = JsonArtifactRepository()
     pu_repo = JsonProposedUpdateRepository()
     return DeleteOQBatchUseCase(oq_repo, artifact_repo, pu_repo)
+
+
+def build_publish_oqs_use_case() -> PublishOQsUseCase:
+    oq_repo = JsonOpenQuestionRepository()
+    slack_publish = SlackSDKPublishAdapter()
+    return PublishOQsUseCase(oq_repo, slack_publish)

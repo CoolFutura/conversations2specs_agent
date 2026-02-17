@@ -23,6 +23,7 @@ from src.cli.wiring import (
     build_set_last_ts_use_case,
     build_delete_oq_use_case,
     build_delete_oq_batch_use_case,
+    build_publish_oqs_use_case,
 )
 
 class SpecsUpdatesAgent:
@@ -60,6 +61,11 @@ class SpecsUpdatesAgent:
         oq_delete_parser = subparsers.add_parser("oq_delete", help="Delete one or more OQs and mark artifacts IRRELEVANT")
         oq_delete_parser.add_argument("oq_ids", nargs="+", help="OQ IDs")
         oq_delete_parser.add_argument("--yes", action="store_true", help="Confirm delete without prompt")
+
+        # Command: publish_oq
+        publish_parser = subparsers.add_parser("publish_oq", help="Publish one or more OQs to Slack")
+        publish_parser.add_argument("oq_ids", nargs="+", help="OQ IDs")
+        publish_parser.add_argument("--channel", help="Slack channel ID (optional, uses .env or --channel)")
 
         # Command: approve_pu
         pu_app_parser = subparsers.add_parser("approve_pu", help="Approve a Proposed Update")
@@ -202,6 +208,27 @@ class SpecsUpdatesAgent:
 
         if result.deleted_ids:
             print(f"Deleted: {', '.join(result.deleted_ids)}")
+
+    def cmd_publish_oq(self, args):
+        channel_id = args.channel or os.getenv("SLACK_CHANNEL_ID", "general")
+        oq_ids = list(args.oq_ids)
+        if not oq_ids:
+            print("No OQ IDs provided.")
+            return
+
+        use_case = build_publish_oqs_use_case()
+        result = use_case.execute(oq_ids, channel_id)
+
+        if result.missing_ids:
+            print(f"Not found: {', '.join(result.missing_ids)}")
+        if result.failed_ids:
+            print(f"Failed: {', '.join(result.failed_ids)}")
+        if result.skipped_ids:
+            print(f"Skipped (not modified): {', '.join(result.skipped_ids)}")
+        if result.updated_ids:
+            print(f"Updated: {', '.join(result.updated_ids)}")
+        if result.published_ids:
+            print(f"Published: {', '.join(result.published_ids)}")
 
     def cmd_approve_pu(self, args):
         print(f"Approving PU {args.pu_id}...")

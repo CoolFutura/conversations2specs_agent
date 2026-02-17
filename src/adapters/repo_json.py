@@ -105,6 +105,10 @@ class JsonOpenQuestionRepository:
             slack_ts=None,
             decision=None,
             decision_rationale=None,
+            published_at=None,
+            published_message_ts=None,
+            published_channel_id=None,
+            last_modified_at=None,
         )
 
         data = load_json("open_questions.json")
@@ -124,6 +128,10 @@ class JsonOpenQuestionRepository:
             "slack_ts": oq.slack_ts,
             "decision": oq.decision,
             "decision_rationale": oq.decision_rationale,
+            "published_at": oq.published_at,
+            "published_message_ts": oq.published_message_ts,
+            "published_channel_id": oq.published_channel_id,
+            "last_modified_at": oq.last_modified_at,
         }
 
     def _from_dict(self, item: dict) -> OpenQuestion:
@@ -136,6 +144,10 @@ class JsonOpenQuestionRepository:
             slack_ts=item.get("slack_ts"),
             decision=item.get("decision"),
             decision_rationale=item.get("decision_rationale"),
+            published_at=item.get("published_at"),
+            published_message_ts=item.get("published_message_ts"),
+            published_channel_id=item.get("published_channel_id"),
+            last_modified_at=item.get("last_modified_at"),
         )
 
 
