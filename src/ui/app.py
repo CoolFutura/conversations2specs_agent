@@ -33,10 +33,13 @@ from PySide6.QtWidgets import (
 from src.cli.wiring import (
     build_add_decision_use_case,
     build_approve_pu_use_case,
+    build_delete_oq_use_case,
     build_ingest_use_case,
     build_list_artifacts_use_case,
     build_list_open_questions_use_case,
     build_list_proposed_updates_use_case,
+    build_modify_oq_use_case,
+    build_publish_oqs_use_case,
     build_transform_artifacts_use_case,
     build_transform_oq_use_case,
 )
@@ -88,6 +91,54 @@ class DecisionDialog(QDialog):
         return self.decision_edit.text().strip(), self.rationale_edit.toPlainText().strip()
 
 
+class EditOQDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        question: str = "",
+        context: str = "",
+        decision: str = "",
+        rationale: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Modify Open Question")
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.question_edit = QLineEdit(question)
+
+        self.context_edit = QTextEdit()
+        self.context_edit.setPlainText(context)
+        self.context_edit.setFixedHeight(140)
+
+        self.decision_edit = QLineEdit(decision)
+
+        self.rationale_edit = QTextEdit()
+        self.rationale_edit.setPlainText(rationale)
+        self.rationale_edit.setFixedHeight(140)
+
+        form.addRow("Question", self.question_edit)
+        form.addRow("Context", self.context_edit)
+        form.addRow("Decision", self.decision_edit)
+        form.addRow("Decision rationale", self.rationale_edit)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> tuple[str, str, str, str]:
+        return (
+            self.question_edit.text().strip(),
+            self.context_edit.toPlainText().strip(),
+            self.decision_edit.text().strip(),
+            self.rationale_edit.toPlainText().strip(),
+        )
+
+
 class RecordsTab(QWidget):
     def __init__(
         self,
@@ -95,6 +146,7 @@ class RecordsTab(QWidget):
         columns: Sequence[tuple[str, Callable[[object], object]]],
         load_records: Callable[[], Iterable[object]],
         format_details: Callable[[object], str],
+        details_actions: Sequence[tuple[str, Callable[[], None]]] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -104,6 +156,7 @@ class RecordsTab(QWidget):
         self.format_details = format_details
         self.records: list[object] = []
         self._all_records: list[object] = []
+        self._action_buttons: list[QPushButton] = []
 
         layout = QVBoxLayout(self)
         top_bar = QHBoxLayout()
@@ -115,6 +168,9 @@ class RecordsTab(QWidget):
         self.filter_input.setPlaceholderText("Type to filter…")
         self.filter_input.textChanged.connect(self._apply_filter)
         top_bar.addWidget(self.filter_input)
+        self.clear_filter_button = QPushButton("Clear")
+        self.clear_filter_button.clicked.connect(self._clear_filter)
+        top_bar.addWidget(self.clear_filter_button)
         layout.addLayout(top_bar)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -139,6 +195,17 @@ class RecordsTab(QWidget):
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         details_layout.addWidget(self.details)
+
+        if details_actions:
+            actions_layout = QHBoxLayout()
+            for label, handler in details_actions:
+                button = QPushButton(label)
+                button.clicked.connect(handler)
+                button.setEnabled(False)
+                self._action_buttons.append(button)
+                actions_layout.addWidget(button)
+            actions_layout.addStretch()
+            details_layout.addLayout(actions_layout)
 
         splitter.addWidget(details_panel)
         splitter.setStretchFactor(0, 3)
@@ -170,6 +237,12 @@ class RecordsTab(QWidget):
             return None
         data = asdict(record)
         return str(data.get("id")) if data.get("id") else None
+    
+    def current_records(self) -> list[object]:
+        return list(self.records)
+
+    def current_filter(self) -> str:
+        return self.filter_input.text().strip()
 
     def _on_selection_changed(self) -> None:
         record = self.selected_record()
@@ -178,11 +251,17 @@ class RecordsTab(QWidget):
     def _update_details(self, record: object | None) -> None:
         if record is None:
             self.details.setPlainText("Select a row to see details.")
+            self._set_actions_enabled(False)
             return
         self.details.setPlainText(self.format_details(record))
+        self._set_actions_enabled(True)
+
+    def _set_actions_enabled(self, enabled: bool) -> None:
+        for button in self._action_buttons:
+            button.setEnabled(enabled)
 
     def _apply_filter(self, text: str) -> None:
-        query = text.strip().lower()
+        query = text.strip()
         if query == "":
             self.records = list(self._all_records)
         else:
@@ -190,11 +269,44 @@ class RecordsTab(QWidget):
         self._render_records()
 
     def _matches(self, record: object, query: str) -> bool:
+        tokens = [token for token in query.split() if token]
+        if not tokens:
+            return True
+
+        for token in tokens:
+            if ":" in token:
+                key, value = token.split(":", 1)
+                if not self._match_keyed_token(record, key, value):
+                    return False
+            else:
+                if not self._match_free_token(record, token):
+                    return False
+        return True
+
+    def _match_free_token(self, record: object, token: str) -> bool:
+        needle = token.lower()
         for _, getter in self.columns:
             value = _fmt(getter(record)).lower()
-            if query in value:
+            if needle in value:
                 return True
         return False
+
+    def _match_keyed_token(self, record: object, key: str, value: str) -> bool:
+        key = key.strip().lower()
+        needle = value.strip().lower()
+        if key == "" or needle == "":
+            return False
+
+        column_lookup = {label.lower(): getter for label, getter in self.columns}
+        getter = column_lookup.get(key)
+        if getter is None:
+            return False
+
+        cell = _fmt(getter(record)).lower()
+        return needle in cell
+
+    def _clear_filter(self) -> None:
+        self.filter_input.clear()
 
     def _render_records(self) -> None:
         self.table.setRowCount(len(self.records))
@@ -247,6 +359,10 @@ class MainWindow(QMainWindow):
         self.decide_oq_button.clicked.connect(self.handle_decide_oq)
         actions_layout.addWidget(self.decide_oq_button)
 
+        self.publish_oqs_button = QPushButton("Publish OQs")
+        self.publish_oqs_button.clicked.connect(self.handle_publish_oqs_bulk)
+        actions_layout.addWidget(self.publish_oqs_button)
+
         self.approve_pu_button = QPushButton("Approve PU")
         self.approve_pu_button.clicked.connect(self.handle_approve_pu)
         actions_layout.addWidget(self.approve_pu_button)
@@ -290,6 +406,12 @@ class MainWindow(QMainWindow):
             ],
             load_records=self._load_open_questions,
             format_details=_format_open_question_details,
+            details_actions=[
+                ("Decide OQ", self.handle_decide_oq),
+                ("Modify OQ", self.handle_modify_oq),
+                ("Publish OQ", self.handle_publish_oq),
+                ("Delete OQ", self.handle_delete_oq),
+            ],
         )
         self.tabs.addTab(self.oq_tab, "Open Questions")
 
@@ -373,19 +495,21 @@ class MainWindow(QMainWindow):
         self.refresh_all()
 
     def handle_decide_oq(self) -> None:
-        oq_id = self.oq_tab.selected_id()
-        if not oq_id:
+        record = self.oq_tab.selected_record()
+        if record is None:
             QMessageBox.information(self, "Decide OQ", "Select an OQ first.")
             return
+        oq_id = str(record.id)
 
-        dialog = DecisionDialog(self)
+        dialog = DecisionDialog(
+            self,
+            decision=record.decision or "",
+            rationale=record.decision_rationale or "",
+        )
         if dialog.exec() != QDialog.Accepted:
             return
 
         decision, rationale = dialog.values()
-        if decision == "" or rationale == "":
-            QMessageBox.warning(self, "Decide OQ", "Decision and rationale are required.")
-            return
 
         try:
             use_case = build_add_decision_use_case()
@@ -399,6 +523,197 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "Decide OQ", f"Decision saved for {oq_id}.")
             self.refresh_all()
+
+    def handle_modify_oq(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Modify OQ", "Select an OQ first.")
+            return
+
+        dialog = EditOQDialog(
+            self,
+            question=record.question or "",
+            context=record.context or "",
+            decision=record.decision or "",
+            rationale=record.decision_rationale or "",
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        question, context, decision, rationale = dialog.values()
+        confirm = QMessageBox.question(
+            self,
+            "Confirm OQ update",
+            f"Apply changes to OQ {record.id}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_modify_oq_use_case()
+            result = use_case.execute(
+                record.id,
+                question=question,
+                context=context,
+                decision=decision,
+                decision_rationale=rationale,
+            )
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Modify OQ", str(exc))
+            return
+
+        if not result.updated:
+            QMessageBox.warning(self, "Modify OQ", f"OQ {record.id} not found.")
+        else:
+            QMessageBox.information(self, "Modify OQ", f"OQ {record.id} updated.")
+            self.refresh_all()
+
+    def handle_delete_oq(self) -> None:
+        oq_id = self.oq_tab.selected_id()
+        if not oq_id:
+            QMessageBox.information(self, "Delete OQ", "Select an OQ first.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm delete",
+            "Delete this OQ? Its artifact will be marked IRRELEVANT and linked PUs removed.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_delete_oq_use_case()
+            result = use_case.execute(oq_id)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Delete OQ", str(exc))
+            return
+
+        if not result.deleted:
+            QMessageBox.warning(self, "Delete OQ", f"OQ {oq_id} not found.")
+        else:
+            QMessageBox.information(self, "Delete OQ", f"OQ {oq_id} deleted.")
+            self.refresh_all()
+
+    def handle_publish_oq(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Publish OQ", "Select an OQ first.")
+            return
+
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Publish OQ",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm publish",
+            f"Publish OQ {record.id} to {channel.strip()}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_publish_oqs_use_case()
+            result = use_case.execute([record.id], channel.strip())
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Publish OQ", str(exc))
+            return
+
+        message = None
+        if result.missing_ids:
+            message = f"OQ {record.id} not found."
+            QMessageBox.warning(self, "Publish OQ", message)
+        elif result.failed_ids:
+            message = f"Failed to publish OQ {record.id}."
+            QMessageBox.critical(self, "Publish OQ", message)
+        elif result.updated_ids:
+            message = f"Updated published message for {record.id}."
+            QMessageBox.information(self, "Publish OQ", message)
+        elif result.published_ids:
+            message = f"Published OQ {record.id}."
+            QMessageBox.information(self, "Publish OQ", message)
+        elif result.skipped_ids:
+            message = f"OQ {record.id} already published and not modified."
+            QMessageBox.information(self, "Publish OQ", message)
+        else:
+            message = f"No action taken for {record.id}."
+            QMessageBox.information(self, "Publish OQ", message)
+
+        self.refresh_all()
+
+    def handle_publish_oqs_bulk(self) -> None:
+        records = self.oq_tab.current_records()
+        if not records:
+            QMessageBox.information(self, "Publish OQs", "No OQs in the current view.")
+            return
+
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Publish OQs",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        filter_text = self.oq_tab.current_filter()
+        count = len(records)
+        if filter_text:
+            scope_note = f"Filter: {filter_text}"
+        else:
+            scope_note = "No filter applied."
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm publish",
+            f"Publish {count} OQ(s) to {channel.strip()}?\n{scope_note}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        oq_ids = [record.id for record in records]
+        try:
+            use_case = build_publish_oqs_use_case()
+            result = use_case.execute(oq_ids, channel.strip())
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Publish OQs", str(exc))
+            return
+
+        lines: list[str] = []
+        if result.published_ids:
+            lines.append(f"Published: {len(result.published_ids)}")
+        if result.updated_ids:
+            lines.append(f"Updated: {len(result.updated_ids)}")
+        if result.skipped_ids:
+            lines.append(f"Skipped (not modified): {len(result.skipped_ids)}")
+        if result.missing_ids:
+            lines.append(f"Missing: {len(result.missing_ids)}")
+        if result.failed_ids:
+            lines.append(f"Failed: {len(result.failed_ids)}")
+
+        message = "\n".join(lines) if lines else "No action taken."
+        if result.failed_ids:
+            QMessageBox.warning(self, "Publish OQs", message)
+        else:
+            QMessageBox.information(self, "Publish OQs", message)
+
+        self.refresh_all()
 
     def handle_approve_pu(self) -> None:
         pu_id = self.pu_tab.selected_id()

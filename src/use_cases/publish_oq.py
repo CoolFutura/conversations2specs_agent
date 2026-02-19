@@ -35,6 +35,9 @@ class PublishOQsUseCase:
             if not oq:
                 missing_ids.append(oq_id)
                 continue
+            if oq.status != "OPEN":
+                skipped_ids.append(oq_id)
+                continue
 
             message = self._build_message(oq)
             try:

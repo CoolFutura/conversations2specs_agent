@@ -32,6 +32,7 @@ class ModifyOQUseCase:
             return ModifyOQResult(updated=False, oq=None)
 
         was_decided = oq.status == "DECIDED"
+        was_transformed = oq.status == "TRANSFORMED"
 
         if question is not None:
             oq.question = question
@@ -42,13 +43,18 @@ class ModifyOQUseCase:
         if decision_rationale is not None:
             oq.decision_rationale = decision_rationale
 
-        oq.status = "OPEN"
+        oq.status = "DECIDED" if self._has_decision(oq) else "OPEN"
         oq.last_modified_at = datetime.datetime.now().isoformat()
         self.oq_repo.save(oq)
 
-        if was_decided:
+        if was_decided or was_transformed:
             self.pu_repo.delete_by_source_oq_id(oq.id)
 
         return ModifyOQResult(updated=True, oq=oq)
 
-    # No helper methods needed beyond modification logic.
+    def _has_decision(self, oq: OpenQuestion) -> bool:
+        if not oq.decision or not oq.decision_rationale:
+            return False
+        if str(oq.decision).strip() == "" or str(oq.decision_rationale).strip() == "":
+            return False
+        return True

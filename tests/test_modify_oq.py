@@ -52,7 +52,7 @@ class FakePURepo:
 
 # Verifies that ModifyOQUseCase updates fields and normalizes status.
 class ModifyOQUseCaseTests(unittest.TestCase):
-    def test_updates_fields_and_sets_open(self):
+    def test_updates_fields_and_sets_decided_when_complete(self):
         oq = OpenQuestion(
             id="oq_1",
             artifact_id="art_1",
@@ -82,7 +82,7 @@ class ModifyOQUseCaseTests(unittest.TestCase):
         self.assertEqual(result.oq.context, "New context")
         self.assertEqual(result.oq.decision, "DECISION")
         self.assertEqual(result.oq.decision_rationale, "WHY")
-        self.assertEqual(result.oq.status, "OPEN")
+        self.assertEqual(result.oq.status, "DECIDED")
         self.assertIsNotNone(result.oq.last_modified_at)
 
     def test_sets_open_when_decision_incomplete(self):

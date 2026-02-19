@@ -25,7 +25,11 @@ class AddDecisionUseCase:
         oq.decision = decision
         oq.decision_rationale = rationale
         if self._has_decision(oq):
-            oq.status = "DECIDED"
+            if oq.status in {"OPEN", "DECIDED"}:
+                oq.status = "DECIDED"
+        else:
+            if oq.status == "DECIDED":
+                oq.status = "OPEN"
         self.oq_repo.save(oq)
         return AddDecisionResult(updated=True, oq=oq)
 

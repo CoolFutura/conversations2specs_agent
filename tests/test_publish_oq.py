@@ -38,7 +38,7 @@ class FakeSlackPublish:
 
 
 class PublishOQsUseCaseTests(unittest.TestCase):
-    # Verifies publish/republish/skip behavior based on last_modified_at.
+    # Verifies publish/republish/skip behavior based on status and last_modified_at.
     def test_publish_new_and_skip_unmodified(self):
         oq_new = OpenQuestion(
             id="oq_1",
@@ -95,6 +95,27 @@ class PublishOQsUseCaseTests(unittest.TestCase):
         self.assertIn("oq_3", result.updated_ids)
         self.assertEqual(len(slack.updates), 1)
         self.assertEqual(slack.updates[0][1], "333.444")
+
+    # Ensures non-OPEN OQs are skipped.
+    def test_skip_when_status_not_open(self):
+        oq_transformed = OpenQuestion(
+            id="oq_4",
+            artifact_id="art_4",
+            question="Q4",
+            context="ctx",
+            status="TRANSFORMED",
+            slack_ts=None,
+        )
+
+        repo = FakeOQRepo([oq_transformed])
+        slack = FakeSlackPublish()
+        use_case = PublishOQsUseCase(repo, slack)
+
+        result = use_case.execute(["oq_4"], "C1")
+
+        self.assertIn("oq_4", result.skipped_ids)
+        self.assertEqual(len(slack.posts), 0)
+        self.assertEqual(len(slack.updates), 0)
 
 
 if __name__ == "__main__":
