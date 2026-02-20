@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 import sys
 from dataclasses import asdict
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -25,6 +27,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -33,13 +36,16 @@ from PySide6.QtWidgets import (
 from src.cli.wiring import (
     build_add_decision_use_case,
     build_approve_pu_use_case,
+    build_change_artifact_status_use_case,
     build_delete_oq_use_case,
     build_ingest_use_case,
     build_list_artifacts_use_case,
-    build_list_open_questions_use_case,
+    build_list_all_oq_use_case,
     build_list_proposed_updates_use_case,
     build_modify_oq_use_case,
     build_publish_oqs_use_case,
+    build_reset_data_use_case,
+    build_set_last_ts_use_case,
     build_transform_artifacts_use_case,
     build_transform_oq_use_case,
 )
@@ -62,6 +68,19 @@ def _truncate(value: object, limit: int = MAX_CELL_LEN) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+def _fmt_html(value: object) -> str:
+    return html.escape(_fmt(value))
+
+
+def _link_html(url: object) -> str:
+    if url is None:
+        return "-"
+    text = str(url).strip()
+    if text == "" or text == "-":
+        return "-"
+    safe = html.escape(text)
+    return f'<a href="{safe}">{safe}</a>'
 
 
 class DecisionDialog(QDialog):
@@ -192,7 +211,8 @@ class RecordsTab(QWidget):
         details_layout.setContentsMargins(0, 0, 0, 0)
         details_layout.addWidget(QLabel("Details"))
 
-        self.details = QTextEdit()
+        self.details = QTextBrowser()
+        self.details.setOpenExternalLinks(True)
         self.details.setReadOnly(True)
         details_layout.addWidget(self.details)
 
@@ -250,10 +270,10 @@ class RecordsTab(QWidget):
 
     def _update_details(self, record: object | None) -> None:
         if record is None:
-            self.details.setPlainText("Select a row to see details.")
+            self.details.setHtml(_fmt_html("Select a row to see details."))
             self._set_actions_enabled(False)
             return
-        self.details.setPlainText(self.format_details(record))
+        self.details.setHtml(self.format_details(record))
         self._set_actions_enabled(True)
 
     def _set_actions_enabled(self, enabled: bool) -> None:
@@ -372,6 +392,21 @@ class MainWindow(QMainWindow):
         actions_layout.addWidget(self.refresh_button)
 
         actions_layout.addStretch()
+
+        system_separator = QFrame()
+        system_separator.setFrameShape(QFrame.VLine)
+        system_separator.setFrameShadow(QFrame.Sunken)
+        system_separator.setFixedHeight(24)
+        actions_layout.addWidget(system_separator)
+
+        self.reset_data_button = QPushButton("Clear Data")
+        self.reset_data_button.clicked.connect(self.handle_reset_data)
+        actions_layout.addWidget(self.reset_data_button)
+
+        self.set_last_ts_button = QPushButton("Set last_ts")
+        self.set_last_ts_button.clicked.connect(self.handle_set_last_ts)
+        actions_layout.addWidget(self.set_last_ts_button)
+
         layout.addLayout(actions_layout)
 
         self.tabs = QTabWidget()
@@ -393,11 +428,14 @@ class MainWindow(QMainWindow):
             ],
             load_records=self._load_artifacts,
             format_details=_format_artifact_details,
+            details_actions=[
+                ("Change Status", self.handle_change_artifact_status),
+            ],
         )
         self.tabs.addTab(self.artifacts_tab, "Artifacts")
 
         self.oq_tab = RecordsTab(
-            title="Open Questions",
+            title="Open Questions (All)",
             columns=[
                 ("ID", lambda o: o.id),
                 ("Status", lambda o: o.status),
@@ -413,7 +451,7 @@ class MainWindow(QMainWindow):
                 ("Delete OQ", self.handle_delete_oq),
             ],
         )
-        self.tabs.addTab(self.oq_tab, "Open Questions")
+        self.tabs.addTab(self.oq_tab, "Open Questions (All)")
 
         self.pu_tab = RecordsTab(
             title="Proposed Updates",
@@ -493,6 +531,122 @@ class MainWindow(QMainWindow):
             f"Created {result.transformed_count} proposed updates.",
         )
         self.refresh_all()
+
+    def handle_reset_data(self) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Clear Data",
+            "Clear all stored data (artifacts, questions, updates, threads, conversations)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_reset_data_use_case()
+            result = use_case.execute()
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Clear Data", str(exc))
+            return
+
+        if result.success:
+            QMessageBox.information(self, "Clear Data", "Data cleared.")
+            self.refresh_all()
+        else:
+            QMessageBox.warning(self, "Clear Data", "Data was not cleared.")
+
+    def handle_set_last_ts(self) -> None:
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Set last_ts",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        days_back, ok = QInputDialog.getDouble(
+            self,
+            "Set last_ts",
+            "Days back from now",
+            3.0,
+            0.0,
+            3650.0,
+            2,
+        )
+        if not ok:
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm set last_ts",
+            f"Set last_ts for {channel.strip()} to {days_back} day(s) back?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_set_last_ts_use_case()
+            result = use_case.execute(channel.strip(), days_back)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Set last_ts", str(exc))
+            return
+
+        QMessageBox.information(
+            self,
+            "Set last_ts",
+            f"last_ts set for {result.channel_id} to {result.last_ts}.",
+        )
+
+    def handle_change_artifact_status(self) -> None:
+        record = self.artifacts_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Change Status", "Select an artifact first.")
+            return
+
+        choices = ["OQ", "PU", "IRRELEVANT"]
+        current = record.status if record.status in choices else None
+        status, ok = QInputDialog.getItem(
+            self,
+            "Change Status",
+            f"Artifact {record.id} status",
+            choices,
+            choices.index(current) if current in choices else 0,
+            False,
+        )
+        if not ok or status.strip() == "":
+            return
+
+        if status == record.status:
+            QMessageBox.information(self, "Change Status", "Status is unchanged.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm status change",
+            f"Change status of {record.id} to {status}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_change_artifact_status_use_case()
+            result = use_case.execute(record.id, status)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Change Status", str(exc))
+            return
+
+        if not result.updated:
+            QMessageBox.warning(self, "Change Status", f"Artifact {record.id} not found.")
+        else:
+            QMessageBox.information(self, "Change Status", f"Status updated for {record.id}.")
+            self.refresh_all()
 
     def handle_decide_oq(self) -> None:
         record = self.oq_tab.selected_record()
@@ -744,7 +898,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _load_open_questions() -> Iterable[object]:
-        use_case = build_list_open_questions_use_case()
+        use_case = build_list_all_oq_use_case()
         return use_case.execute()
 
     @staticmethod
@@ -759,67 +913,76 @@ def _format_artifact_details(artifact: object) -> str:
     if hasattr(artifact_type, "value"):
         artifact_type = artifact_type.value
     lines = [
-        f"ID: {_fmt(data.get('id'))}",
-        f"Conversation ID: {_fmt(data.get('conversation_id'))}",
-        f"Type: {_fmt(artifact_type)}",
-        f"Status: {_fmt(data.get('status'))}",
+        f"<b>ID:</b> {_fmt_html(data.get('id'))}",
+        f"<b>Conversation ID:</b> {_fmt_html(data.get('conversation_id'))}",
+        f"<b>Type:</b> {_fmt_html(artifact_type)}",
+        f"<b>Status:</b> {_fmt_html(data.get('status'))}",
+        f"<b>Thread URL:</b> {_link_html(data.get('source_thread_url'))}",
+        f"<b>Channel ID:</b> {_fmt_html(data.get('source_channel_id'))}",
+        f"<b>Thread TS:</b> {_fmt_html(data.get('source_thread_ts'))}",
         "",
-        "Rephrasing:",
-        _fmt(data.get("rephrasing")),
+        "<b>Rephrasing:</b>",
+        _fmt_html(data.get("rephrasing")),
         "",
-        "Rationale:",
-        _fmt(data.get("rationale")),
+        "<b>Rationale:</b>",
+        _fmt_html(data.get("rationale")),
         "",
-        "Summary of context:",
-        _fmt(data.get("summary_of_context")),
+        "<b>Summary of context:</b>",
+        _fmt_html(data.get("summary_of_context")),
     ]
-    return "\n".join(lines)
+    return "<br>".join(lines)
 
 
 def _format_open_question_details(oq: object) -> str:
     data = asdict(oq)
     lines = [
-        f"ID: {_fmt(data.get('id'))}",
-        f"Artifact ID: {_fmt(data.get('artifact_id'))}",
-        f"Status: {_fmt(data.get('status'))}",
-        f"Slack TS: {_fmt(data.get('slack_ts'))}",
+        f"<b>ID:</b> {_fmt_html(data.get('id'))}",
+        f"<b>Artifact ID:</b> {_fmt_html(data.get('artifact_id'))}",
+        f"<b>Status:</b> {_fmt_html(data.get('status'))}",
+        f"<b>Slack TS:</b> {_fmt_html(data.get('slack_ts'))}",
+        f"<b>Thread URL:</b> {_link_html(data.get('source_thread_url'))}",
+        f"<b>Channel ID:</b> {_fmt_html(data.get('source_channel_id'))}",
+        f"<b>Thread TS:</b> {_fmt_html(data.get('source_thread_ts'))}",
         "",
-        "Question:",
-        _fmt(data.get("question")),
+        "<b>Question:</b>",
+        _fmt_html(data.get("question")),
         "",
-        "Context:",
-        _fmt(data.get("context")),
+        "<b>Context:</b>",
+        _fmt_html(data.get("context")),
         "",
-        "Decision:",
-        _fmt(data.get("decision")),
+        "<b>Decision:</b>",
+        _fmt_html(data.get("decision")),
         "",
-        "Decision rationale:",
-        _fmt(data.get("decision_rationale")),
+        "<b>Decision rationale:</b>",
+        _fmt_html(data.get("decision_rationale")),
     ]
-    return "\n".join(lines)
+    return "<br>".join(lines)
 
 
 def _format_proposed_update_details(pu: object) -> str:
     data = asdict(pu)
     lines = [
-        f"ID: {_fmt(data.get('id'))}",
-        f"Artifact ID: {_fmt(data.get('artifact_id'))}",
-        f"Source OQ ID: {_fmt(data.get('source_oq_id'))}",
-        f"Status: {_fmt(data.get('status'))}",
+        f"<b>ID:</b> {_fmt_html(data.get('id'))}",
+        f"<b>Artifact ID:</b> {_fmt_html(data.get('artifact_id'))}",
+        f"<b>Source OQ ID:</b> {_fmt_html(data.get('source_oq_id'))}",
+        f"<b>Status:</b> {_fmt_html(data.get('status'))}",
+        f"<b>Thread URL:</b> {_link_html(data.get('source_thread_url'))}",
+        f"<b>Channel ID:</b> {_fmt_html(data.get('source_channel_id'))}",
+        f"<b>Thread TS:</b> {_fmt_html(data.get('source_thread_ts'))}",
         "",
-        "Rephrasing:",
-        _fmt(data.get("rephrasing")),
+        "<b>Rephrasing:</b>",
+        _fmt_html(data.get("rephrasing")),
         "",
-        "Context:",
-        _fmt(data.get("context")),
+        "<b>Context:</b>",
+        _fmt_html(data.get("context")),
         "",
-        "Decision:",
-        _fmt(data.get("decision")),
+        "<b>Decision:</b>",
+        _fmt_html(data.get("decision")),
         "",
-        "Rationale:",
-        _fmt(data.get("rationale")),
+        "<b>Rationale:</b>",
+        _fmt_html(data.get("rationale")),
     ]
-    return "\n".join(lines)
+    return "<br>".join(lines)
 
 
 def main() -> None:

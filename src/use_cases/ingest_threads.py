@@ -46,6 +46,8 @@ class IngestThreadsUseCase:
             ts = thread.get("ts")
             if not ts:
                 continue
+            channel_id = thread.get("channel_id")
+            thread_url = thread.get("thread_url") or thread.get("permalink")
 
             conv_text = self.normalizer(thread)
             conversations.append({"ts": ts, "text": conv_text})
@@ -59,7 +61,15 @@ class IngestThreadsUseCase:
 
             artifact_type = self._parse_artifact_type(classification.get("type"))
             artifact_status = "IRRELEVANT" if artifact_type == ArtifactType.IRRELEVANT else "PENDING"
-            artifact = self._artifact_from_classification(ts, artifact_type, classification, status=artifact_status)
+            artifact = self._artifact_from_classification(
+                ts,
+                artifact_type,
+                classification,
+                status=artifact_status,
+                source_channel_id=channel_id,
+                source_thread_ts=ts,
+                source_thread_url=thread_url,
+            )
             self.artifact_repo.save(artifact)
             artifacts_created += 1
             if artifact_type == ArtifactType.OQ:
@@ -91,6 +101,9 @@ class IngestThreadsUseCase:
         artifact_type: ArtifactType,
         classification: dict,
         status: str = "PENDING",
+        source_channel_id: str | None = None,
+        source_thread_ts: str | None = None,
+        source_thread_url: str | None = None,
     ) -> Artifact:
         return Artifact(
             id=f"art_{uuid.uuid4().hex[:8]}",
@@ -100,4 +113,7 @@ class IngestThreadsUseCase:
             rephrasing=classification.get("rephrasing", ""),
             rationale=classification.get("rationale", ""),
             summary_of_context=classification.get("summary_of_context", ""),
+            source_channel_id=source_channel_id,
+            source_thread_ts=source_thread_ts,
+            source_thread_url=source_thread_url,
         )

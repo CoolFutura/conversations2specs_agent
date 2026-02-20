@@ -27,7 +27,7 @@ class TransformOQUseCase:
         transformed = 0
 
         for oq in self.oq_repo.list_all():
-            if oq.status not in {"OPEN", "DECIDED"}:
+            if oq.status not in {"OPEN", "DECIDED", "READY_TO_TRANSFORM"}:
                 continue
             if not self._has_decision(oq):
                 continue
@@ -55,6 +55,9 @@ class TransformOQUseCase:
             decision=oq.decision or "",
             rationale=oq.decision_rationale or "Transformed from OQ",
             status="DRAFT",
+            source_channel_id=oq.source_channel_id,
+            source_thread_ts=oq.source_thread_ts,
+            source_thread_url=oq.source_thread_url,
         )
 
     def _has_decision(self, oq: OpenQuestion) -> bool:

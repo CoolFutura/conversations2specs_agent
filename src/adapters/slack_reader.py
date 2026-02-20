@@ -8,6 +8,16 @@ load_dotenv(override=True)
 
 client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 
+def _get_thread_permalink(channel_id, thread_ts):
+    if not channel_id or not thread_ts:
+        return None
+    try:
+        result = client.chat_getPermalink(channel=channel_id, message_ts=thread_ts)
+        return result.get("permalink")
+    except SlackApiError as e:
+        print(f"Error fetching permalink for {thread_ts}: {e.response['error']}")
+        return None
+
 def fetch_slack_threads(channel_id):
     print(f"Fetching threads for channel: {channel_id}...")
     
@@ -35,6 +45,8 @@ def fetch_slack_threads(channel_id):
                     )
                     all_threads.append({
                         "ts": ts,
+                        "channel_id": channel_id,
+                        "thread_url": _get_thread_permalink(channel_id, ts),
                         "messages": replies.get("messages", [])
                     })
                 except SlackApiError as e:
@@ -43,6 +55,8 @@ def fetch_slack_threads(channel_id):
                 # Individual message treated as a single-message thread
                 all_threads.append({
                     "ts": ts,
+                    "channel_id": channel_id,
+                    "thread_url": _get_thread_permalink(channel_id, ts),
                     "messages": [msg]
                 })
 
@@ -59,6 +73,20 @@ def fetch_slack_threads(channel_id):
         print(f"Error fetching history: {e.response['error']}")
     
     return all_threads
+
+def fetch_slack_thread(channel_id, thread_ts):
+    print(f"Fetching thread replies for channel: {channel_id}, thread: {thread_ts}...")
+    try:
+        replies = client.conversations_replies(channel=channel_id, ts=thread_ts)
+        return {
+            "ts": thread_ts,
+            "channel_id": channel_id,
+            "thread_url": _get_thread_permalink(channel_id, thread_ts),
+            "messages": replies.get("messages", []),
+        }
+    except SlackApiError as e:
+        print(f"Error fetching replies for {thread_ts}: {e.response['error']}")
+        return None
 
 def normalize_thread(thread):
     conv_text = ""

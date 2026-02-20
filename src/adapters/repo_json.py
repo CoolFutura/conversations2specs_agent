@@ -45,6 +45,9 @@ class JsonArtifactRepository:
             rephrasing=item.get("rephrasing", ""),
             rationale=item.get("rationale", ""),
             summary_of_context=item.get("summary_of_context", ""),
+            source_channel_id=item.get("source_channel_id"),
+            source_thread_ts=item.get("source_thread_ts", item.get("conversation_id")),
+            source_thread_url=item.get("source_thread_url"),
         )
 
     def _to_dict(self, artifact: Artifact) -> dict:
@@ -56,6 +59,9 @@ class JsonArtifactRepository:
             "rephrasing": artifact.rephrasing,
             "rationale": artifact.rationale,
             "summary_of_context": artifact.summary_of_context,
+            "source_channel_id": artifact.source_channel_id,
+            "source_thread_ts": artifact.source_thread_ts,
+            "source_thread_url": artifact.source_thread_url,
         }
 
 
@@ -109,6 +115,9 @@ class JsonOpenQuestionRepository:
             published_message_ts=None,
             published_channel_id=None,
             last_modified_at=None,
+            source_channel_id=artifact.source_channel_id,
+            source_thread_ts=artifact.source_thread_ts or artifact.conversation_id,
+            source_thread_url=artifact.source_thread_url,
         )
 
         data = load_json("open_questions.json")
@@ -128,6 +137,9 @@ class JsonOpenQuestionRepository:
             "slack_ts": oq.slack_ts,
             "decision": oq.decision,
             "decision_rationale": oq.decision_rationale,
+            "source_channel_id": oq.source_channel_id,
+            "source_thread_ts": oq.source_thread_ts,
+            "source_thread_url": oq.source_thread_url,
             "published_at": oq.published_at,
             "published_message_ts": oq.published_message_ts,
             "published_channel_id": oq.published_channel_id,
@@ -144,6 +156,9 @@ class JsonOpenQuestionRepository:
             slack_ts=item.get("slack_ts"),
             decision=item.get("decision"),
             decision_rationale=item.get("decision_rationale"),
+            source_channel_id=item.get("source_channel_id"),
+            source_thread_ts=item.get("source_thread_ts"),
+            source_thread_url=item.get("source_thread_url"),
             published_at=item.get("published_at"),
             published_message_ts=item.get("published_message_ts"),
             published_channel_id=item.get("published_channel_id"),
@@ -197,6 +212,9 @@ class JsonProposedUpdateRepository:
             decision="",
             rationale=artifact.rationale,
             status="DRAFT",
+            source_channel_id=artifact.source_channel_id,
+            source_thread_ts=artifact.source_thread_ts or artifact.conversation_id,
+            source_thread_url=artifact.source_thread_url,
         )
 
         data = load_json("proposed_updates.json")
@@ -216,6 +234,9 @@ class JsonProposedUpdateRepository:
             "decision": pu.decision,
             "rationale": pu.rationale,
             "status": pu.status,
+            "source_channel_id": pu.source_channel_id,
+            "source_thread_ts": pu.source_thread_ts,
+            "source_thread_url": pu.source_thread_url,
         }
 
     def _from_dict(self, item: dict) -> ProposedUpdate:
@@ -228,6 +249,9 @@ class JsonProposedUpdateRepository:
             decision=item.get("decision", ""),
             rationale=item.get("rationale", ""),
             status=item.get("status", "DRAFT"),
+            source_channel_id=item.get("source_channel_id"),
+            source_thread_ts=item.get("source_thread_ts"),
+            source_thread_url=item.get("source_thread_url"),
         )
 
 

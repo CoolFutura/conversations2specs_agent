@@ -11,6 +11,7 @@ from src.cli.wiring import (
     build_transform_artifacts_use_case,
     build_transform_oq_use_case,
     build_add_decision_use_case,
+    build_decision_from_thread_use_case,
     build_modify_oq_use_case,
     build_approve_pu_use_case,
     build_change_artifact_status_use_case,
@@ -53,6 +54,12 @@ class SpecsUpdatesAgent:
         # Command: oq_decide
         oq_decide_parser = subparsers.add_parser("oq_decide", help="Add a decision to an Open Question")
         oq_decide_parser.add_argument("oq_id", help="OQ ID")
+
+        # Command: oq_decide_thread
+        oq_decide_thread_parser = subparsers.add_parser(
+            "oq_decide_thread", help="Build decision from Slack thread replies"
+        )
+        oq_decide_thread_parser.add_argument("oq_id", help="OQ ID")
 
         # Command: oq_transform
         subparsers.add_parser("oq_transform", help="Transform decided OQs into PUs")
@@ -184,6 +191,33 @@ class SpecsUpdatesAgent:
             return
 
         print(f"Decision saved for OQ {args.oq_id}.")
+
+    def cmd_oq_decide_thread(self, args):
+        print(f"Building decision from Slack thread for OQ {args.oq_id}...")
+        use_case = build_decision_from_thread_use_case()
+        result = use_case.execute(args.oq_id)
+
+        if not result.updated:
+            reason = result.reason or "unknown_error"
+            if reason == "missing_oq":
+                print(f"OQ {args.oq_id} not found.")
+            elif reason == "not_published":
+                print("OQ is not published to Slack yet.")
+            elif reason == "thread_missing":
+                print("Slack thread not found or empty.")
+            elif reason == "no_tech_messages":
+                print("No tech team replies found in the thread.")
+            elif reason == "llm_failed":
+                print("LLM failed to generate a decision.")
+            elif reason == "empty_decision":
+                print("LLM returned an empty decision or rationale.")
+            else:
+                print(f"Failed to build decision: {reason}")
+            return
+
+        print(f"Decision saved for OQ {args.oq_id}.")
+        if result.decision:
+            print(f"Decision: {result.decision}")
 
     def cmd_oq_delete(self, args):
         oq_ids = list(args.oq_ids)
