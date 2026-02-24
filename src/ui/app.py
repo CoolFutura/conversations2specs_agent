@@ -37,6 +37,7 @@ from src.cli.wiring import (
     build_add_decision_use_case,
     build_approve_pu_use_case,
     build_change_artifact_status_use_case,
+    build_decision_from_thread_use_case,
     build_delete_oq_use_case,
     build_ingest_use_case,
     build_list_artifacts_use_case,
@@ -375,7 +376,7 @@ class MainWindow(QMainWindow):
         self.transform_oq_button.clicked.connect(self.handle_transform_oq)
         actions_layout.addWidget(self.transform_oq_button)
 
-        self.decide_oq_button = QPushButton("Decide OQ")
+        self.decide_oq_button = QPushButton("Manual Decision")
         self.decide_oq_button.clicked.connect(self.handle_decide_oq)
         actions_layout.addWidget(self.decide_oq_button)
 
@@ -445,7 +446,8 @@ class MainWindow(QMainWindow):
             load_records=self._load_open_questions,
             format_details=_format_open_question_details,
             details_actions=[
-                ("Decide OQ", self.handle_decide_oq),
+                ("Manual Decision", self.handle_decide_oq),
+                ("Build decision", self.handle_build_decision),
                 ("Modify OQ", self.handle_modify_oq),
                 ("Publish OQ", self.handle_publish_oq),
                 ("Delete OQ", self.handle_delete_oq),
@@ -651,7 +653,7 @@ class MainWindow(QMainWindow):
     def handle_decide_oq(self) -> None:
         record = self.oq_tab.selected_record()
         if record is None:
-            QMessageBox.information(self, "Decide OQ", "Select an OQ first.")
+            QMessageBox.information(self, "Manual Decision", "Select an OQ first.")
             return
         oq_id = str(record.id)
 
@@ -669,14 +671,65 @@ class MainWindow(QMainWindow):
             use_case = build_add_decision_use_case()
             result = use_case.execute(oq_id, decision, rationale)
         except Exception as exc:  # pragma: no cover - UI feedback only
-            QMessageBox.critical(self, "Decide OQ", str(exc))
+            QMessageBox.critical(self, "Manual Decision", str(exc))
             return
 
         if not result.updated:
-            QMessageBox.warning(self, "Decide OQ", f"OQ {oq_id} not found.")
+            QMessageBox.warning(self, "Manual Decision", f"OQ {oq_id} not found.")
         else:
-            QMessageBox.information(self, "Decide OQ", f"Decision saved for {oq_id}.")
+            QMessageBox.information(self, "Manual Decision", f"Decision saved for {oq_id}.")
             self.refresh_all()
+
+    def handle_build_decision(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Build decision", "Select an OQ first.")
+            return
+
+        if not record.published_channel_id or not record.published_message_ts:
+            QMessageBox.warning(
+                self,
+                "Build decision",
+                "OQ must be published before building a decision from the thread.",
+            )
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm build decision",
+            f"Build decision for {record.id} using the Slack thread and LLM?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_decision_from_thread_use_case()
+            result = use_case.execute(str(record.id))
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Build decision", str(exc))
+            return
+
+        if not result.updated:
+            reason = result.reason or "unknown"
+            reason_map = {
+                "missing_oq": "OQ not found.",
+                "not_published": "OQ must be published before building a decision.",
+                "thread_missing": "Slack thread not found or empty.",
+                "no_tech_messages": "No eligible replies found in the thread.",
+                "llm_failed": "Decision model failed to produce a result.",
+                "empty_decision": "Decision result was empty.",
+            }
+            QMessageBox.warning(self, "Build decision", reason_map.get(reason, f"Failed: {reason}"))
+            return
+
+        QMessageBox.information(
+            self,
+            "Build decision",
+            f"Decision built and saved for {record.id}. Messages used: {result.messages_used}.",
+        )
+        self.refresh_all()
 
     def handle_modify_oq(self) -> None:
         record = self.oq_tab.selected_record()
