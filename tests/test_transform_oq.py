@@ -77,6 +77,29 @@ class TransformOQUseCaseTests(unittest.TestCase):
         self.assertEqual(created_pu.context, "ctx")
         self.assertEqual(created_pu.rationale, "WHY")
 
+    def test_transforms_ready_to_transform_oqs(self):
+        oq_ready = OpenQuestion(
+            id="oq_ready",
+            artifact_id="art_ready",
+            question="Q ready",
+            context="ctx",
+            status="READY_TO_TRANSFORM",
+            slack_ts=None,
+            decision="DECISION",
+            decision_rationale="WHY",
+        )
+
+        oq_repo = FakeOQRepo([oq_ready])
+        pu_repo = FakePURepo()
+        use_case = TransformOQUseCase(oq_repo, pu_repo)
+
+        result = use_case.execute()
+
+        self.assertEqual(result.transformed_count, 1)
+        self.assertEqual(result.open_questions_remaining, 0)
+        self.assertEqual(len(pu_repo.saved), 1)
+        self.assertEqual(oq_repo.get_by_id("oq_ready").status, "TRANSFORMED")
+
     def test_no_decided_oqs_creates_nothing(self):
         oq_undecided = OpenQuestion(
             id="oq_3",

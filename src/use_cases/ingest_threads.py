@@ -15,6 +15,9 @@ Normalizer = Callable[[dict], str]
 class IngestThreadsResult:
     conversations: list[dict]
     artifacts_created: int
+    oq_count: int
+    pu_count: int
+    irrelevant_count: int
 
 
 class IngestThreadsUseCase:
@@ -35,11 +38,16 @@ class IngestThreadsUseCase:
 
         conversations: list[dict] = []
         artifacts_created = 0
+        oq_count = 0
+        pu_count = 0
+        irrelevant_count = 0
 
         for thread in threads:
             ts = thread.get("ts")
             if not ts:
                 continue
+            channel_id = thread.get("channel_id")
+            thread_url = thread.get("thread_url") or thread.get("permalink")
 
             conv_text = self.normalizer(thread)
             conversations.append({"ts": ts, "text": conv_text})
@@ -52,16 +60,31 @@ class IngestThreadsUseCase:
                 continue
 
             artifact_type = self._parse_artifact_type(classification.get("type"))
-            if artifact_type == ArtifactType.IRRELEVANT:
-                continue
-
-            artifact = self._artifact_from_classification(ts, artifact_type, classification)
+            artifact_status = "IRRELEVANT" if artifact_type == ArtifactType.IRRELEVANT else "PENDING"
+            artifact = self._artifact_from_classification(
+                ts,
+                artifact_type,
+                classification,
+                status=artifact_status,
+                source_channel_id=channel_id,
+                source_thread_ts=ts,
+                source_thread_url=thread_url,
+            )
             self.artifact_repo.save(artifact)
             artifacts_created += 1
+            if artifact_type == ArtifactType.OQ:
+                oq_count += 1
+            elif artifact_type == ArtifactType.PU:
+                pu_count += 1
+            else:
+                irrelevant_count += 1
 
         return IngestThreadsResult(
             conversations=conversations,
             artifacts_created=artifacts_created,
+            oq_count=oq_count,
+            pu_count=pu_count,
+            irrelevant_count=irrelevant_count,
         )
 
     def _parse_artifact_type(self, raw_type: object) -> ArtifactType:
@@ -77,13 +100,20 @@ class IngestThreadsUseCase:
         conversation_id: str,
         artifact_type: ArtifactType,
         classification: dict,
+        status: str = "PENDING",
+        source_channel_id: str | None = None,
+        source_thread_ts: str | None = None,
+        source_thread_url: str | None = None,
     ) -> Artifact:
         return Artifact(
             id=f"art_{uuid.uuid4().hex[:8]}",
             conversation_id=conversation_id,
             type=artifact_type,
-            status="PENDING",
+            status=status,
             rephrasing=classification.get("rephrasing", ""),
             rationale=classification.get("rationale", ""),
             summary_of_context=classification.get("summary_of_context", ""),
+            source_channel_id=source_channel_id,
+            source_thread_ts=source_thread_ts,
+            source_thread_url=source_thread_url,
         )

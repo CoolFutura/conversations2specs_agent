@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
+
 from src.adapters.slack_reader import normalize_thread
 
-from src.adapters.openai import OpenAILLMClassifier
+from src.adapters.openai import OpenAILLMClassifier, OpenAILLMDecision
 from src.adapters.repo_json import (
     JsonArtifactRepository,
     JsonOpenQuestionRepository,
@@ -12,20 +14,33 @@ from src.adapters.repo_json import (
 from src.adapters.slack_sdk import SlackSDKThreadsAdapter
 from src.adapters.trace_json import JsonTraceabilityAdapter
 from src.adapters.sources_state_json import JsonSourcesStateAdapter
+from src.adapters.data_reset_json import JsonDataResetAdapter
+from src.adapters.slack_publish import SlackSDKPublishAdapter
 from src.use_cases.ingest import IngestUseCase
 from src.use_cases.transform_artifacts import TransformArtifactsUseCase
 from src.use_cases.transform_oq import TransformOQUseCase
 from src.use_cases.approve_pu import ApprovePUUseCase
 from src.use_cases.add_decision import AddDecisionUseCase
+from src.use_cases.build_decision_from_thread import BuildDecisionFromThreadUseCase
 from src.use_cases.modify_oq import ModifyOQUseCase
 from src.use_cases.change_artifact_status import (
     ChangeArtifactStatusUseCase,
     ChangeArtifactStatusBatchUseCase,
 )
 from src.use_cases.list_artifacts import ListArtifactsUseCase
+from src.use_cases.list_all_oq import ListAllOQUseCase
 from src.use_cases.list_open_questions import ListOpenQuestionsUseCase
 from src.use_cases.list_proposed_updates import ListProposedUpdatesUseCase
 from src.use_cases.init_sync import InitSyncUseCase
+from src.use_cases.reset_data import ResetDataUseCase
+from src.use_cases.set_last_ts import SetLastTsUseCase
+from src.use_cases.delete_oq import DeleteOQUseCase, DeleteOQBatchUseCase
+from src.use_cases.publish_oq import PublishOQsUseCase
+
+
+def _parse_tech_team_user_ids() -> set[str]:
+    raw = os.getenv("TECH_TEAM_USER_IDS", "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 def build_ingest_use_case() -> IngestUseCase:
@@ -60,6 +75,20 @@ def build_add_decision_use_case() -> AddDecisionUseCase:
     return AddDecisionUseCase(oq_repo)
 
 
+def build_decision_from_thread_use_case() -> BuildDecisionFromThreadUseCase:
+    slack_adapter = SlackSDKThreadsAdapter()
+    llm_decider = OpenAILLMDecision()
+    oq_repo = JsonOpenQuestionRepository()
+    tech_team_user_ids = _parse_tech_team_user_ids()
+    return BuildDecisionFromThreadUseCase(
+        oq_repo,
+        slack_adapter,
+        llm_decider,
+        normalize_thread,
+        tech_team_user_ids,
+    )
+
+
 def build_modify_oq_use_case() -> ModifyOQUseCase:
     oq_repo = JsonOpenQuestionRepository()
     pu_repo = JsonProposedUpdateRepository()
@@ -86,6 +115,11 @@ def build_list_open_questions_use_case() -> ListOpenQuestionsUseCase:
     return ListOpenQuestionsUseCase(oq_repo)
 
 
+def build_list_all_oq_use_case() -> ListAllOQUseCase:
+    oq_repo = JsonOpenQuestionRepository()
+    return ListAllOQUseCase(oq_repo)
+
+
 def build_list_proposed_updates_use_case() -> ListProposedUpdatesUseCase:
     pu_repo = JsonProposedUpdateRepository()
     return ListProposedUpdatesUseCase(pu_repo)
@@ -94,3 +128,33 @@ def build_list_proposed_updates_use_case() -> ListProposedUpdatesUseCase:
 def build_init_sync_use_case() -> InitSyncUseCase:
     sources_state = JsonSourcesStateAdapter()
     return InitSyncUseCase(sources_state)
+
+
+def build_reset_data_use_case() -> ResetDataUseCase:
+    reset_adapter = JsonDataResetAdapter()
+    return ResetDataUseCase(reset_adapter)
+
+
+def build_set_last_ts_use_case() -> SetLastTsUseCase:
+    sources_state = JsonSourcesStateAdapter()
+    return SetLastTsUseCase(sources_state)
+
+
+def build_delete_oq_use_case() -> DeleteOQUseCase:
+    oq_repo = JsonOpenQuestionRepository()
+    artifact_repo = JsonArtifactRepository()
+    pu_repo = JsonProposedUpdateRepository()
+    return DeleteOQUseCase(oq_repo, artifact_repo, pu_repo)
+
+
+def build_delete_oq_batch_use_case() -> DeleteOQBatchUseCase:
+    oq_repo = JsonOpenQuestionRepository()
+    artifact_repo = JsonArtifactRepository()
+    pu_repo = JsonProposedUpdateRepository()
+    return DeleteOQBatchUseCase(oq_repo, artifact_repo, pu_repo)
+
+
+def build_publish_oqs_use_case() -> PublishOQsUseCase:
+    oq_repo = JsonOpenQuestionRepository()
+    slack_publish = SlackSDKPublishAdapter()
+    return PublishOQsUseCase(oq_repo, slack_publish)

@@ -20,6 +20,9 @@ class Artifact:
     rephrasing: str
     rationale: str
     summary_of_context: str
+    source_channel_id: Optional[str] = None
+    source_thread_ts: Optional[str] = None
+    source_thread_url: Optional[str] = None
 
 
 @dataclass
@@ -32,6 +35,13 @@ class OpenQuestion:
     slack_ts: Optional[str] = None
     decision: Optional[str] = None
     decision_rationale: Optional[str] = None
+    published_at: Optional[str] = None
+    published_message_ts: Optional[str] = None
+    published_channel_id: Optional[str] = None
+    last_modified_at: Optional[str] = None
+    source_channel_id: Optional[str] = None
+    source_thread_ts: Optional[str] = None
+    source_thread_url: Optional[str] = None
 
 
 @dataclass
@@ -44,6 +54,9 @@ class ProposedUpdate:
     decision: str
     rationale: str
     status: str
+    source_channel_id: Optional[str] = None
+    source_thread_ts: Optional[str] = None
+    source_thread_url: Optional[str] = None
 
 
 @dataclass

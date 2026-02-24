@@ -79,6 +79,27 @@ class AddDecisionUseCaseTests(unittest.TestCase):
         self.assertIsNotNone(result.oq)
         self.assertEqual(result.oq.status, "OPEN")
 
+    def test_incomplete_decision_resets_decided_to_open(self):
+        oq = OpenQuestion(
+            id="oq_3",
+            artifact_id="art_3",
+            question="Q3",
+            context="ctx",
+            status="DECIDED",
+            slack_ts=None,
+            decision="DECISION",
+            decision_rationale="WHY",
+        )
+
+        oq_repo = FakeOQRepo([oq])
+        use_case = AddDecisionUseCase(oq_repo)
+
+        result = use_case.execute("oq_3", decision="DECISION", rationale="")
+
+        self.assertTrue(result.updated)
+        self.assertIsNotNone(result.oq)
+        self.assertEqual(result.oq.status, "OPEN")
+
 
 if __name__ == "__main__":
     unittest.main()

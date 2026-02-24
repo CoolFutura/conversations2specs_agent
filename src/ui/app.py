@@ -1,0 +1,1050 @@
+from __future__ import annotations
+
+import html
+import os
+import sys
+from dataclasses import asdict
+from typing import Callable, Iterable, Sequence
+
+from dotenv import load_dotenv
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextBrowser,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from src.cli.wiring import (
+    build_add_decision_use_case,
+    build_approve_pu_use_case,
+    build_change_artifact_status_use_case,
+    build_decision_from_thread_use_case,
+    build_delete_oq_use_case,
+    build_ingest_use_case,
+    build_list_artifacts_use_case,
+    build_list_all_oq_use_case,
+    build_list_proposed_updates_use_case,
+    build_modify_oq_use_case,
+    build_publish_oqs_use_case,
+    build_reset_data_use_case,
+    build_set_last_ts_use_case,
+    build_transform_artifacts_use_case,
+    build_transform_oq_use_case,
+)
+
+
+MAX_CELL_LEN = 80
+
+
+def _fmt(value: object) -> str:
+    if value is None:
+        return "-"
+    text = str(value)
+    if text.strip() == "":
+        return "-"
+    return text
+
+
+def _truncate(value: object, limit: int = MAX_CELL_LEN) -> str:
+    text = _fmt(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+def _fmt_html(value: object) -> str:
+    return html.escape(_fmt(value))
+
+
+def _link_html(url: object) -> str:
+    if url is None:
+        return "-"
+    text = str(url).strip()
+    if text == "" or text == "-":
+        return "-"
+    safe = html.escape(text)
+    return f'<a href="{safe}">{safe}</a>'
+
+
+class DecisionDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None, decision: str = "", rationale: str = "") -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Decision")
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.decision_edit = QLineEdit(decision)
+        self.rationale_edit = QTextEdit()
+        self.rationale_edit.setPlainText(rationale)
+        self.rationale_edit.setFixedHeight(120)
+
+        form.addRow("Decision", self.decision_edit)
+        form.addRow("Rationale", self.rationale_edit)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> tuple[str, str]:
+        return self.decision_edit.text().strip(), self.rationale_edit.toPlainText().strip()
+
+
+class EditOQDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        question: str = "",
+        context: str = "",
+        decision: str = "",
+        rationale: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Modify Open Question")
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.question_edit = QLineEdit(question)
+
+        self.context_edit = QTextEdit()
+        self.context_edit.setPlainText(context)
+        self.context_edit.setFixedHeight(140)
+
+        self.decision_edit = QLineEdit(decision)
+
+        self.rationale_edit = QTextEdit()
+        self.rationale_edit.setPlainText(rationale)
+        self.rationale_edit.setFixedHeight(140)
+
+        form.addRow("Question", self.question_edit)
+        form.addRow("Context", self.context_edit)
+        form.addRow("Decision", self.decision_edit)
+        form.addRow("Decision rationale", self.rationale_edit)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> tuple[str, str, str, str]:
+        return (
+            self.question_edit.text().strip(),
+            self.context_edit.toPlainText().strip(),
+            self.decision_edit.text().strip(),
+            self.rationale_edit.toPlainText().strip(),
+        )
+
+
+class RecordsTab(QWidget):
+    def __init__(
+        self,
+        title: str,
+        columns: Sequence[tuple[str, Callable[[object], object]]],
+        load_records: Callable[[], Iterable[object]],
+        format_details: Callable[[object], str],
+        details_actions: Sequence[tuple[str, Callable[[], None]]] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.title = title
+        self.columns = list(columns)
+        self.load_records = load_records
+        self.format_details = format_details
+        self.records: list[object] = []
+        self._all_records: list[object] = []
+        self._action_buttons: list[QPushButton] = []
+
+        layout = QVBoxLayout(self)
+        top_bar = QHBoxLayout()
+        self.count_label = QLabel("Count: 0")
+        top_bar.addWidget(self.count_label)
+        top_bar.addStretch()
+        top_bar.addWidget(QLabel("Filter"))
+        self.filter_input = QLineEdit()
+        self.filter_input.setPlaceholderText("Type to filter…")
+        self.filter_input.textChanged.connect(self._apply_filter)
+        top_bar.addWidget(self.filter_input)
+        self.clear_filter_button = QPushButton("Clear")
+        self.clear_filter_button.clicked.connect(self._clear_filter)
+        top_bar.addWidget(self.clear_filter_button)
+        layout.addLayout(top_bar)
+
+        splitter = QSplitter(Qt.Horizontal)
+
+        self.table = QTableWidget(0, len(self.columns))
+        self.table.setHorizontalHeaderLabels([label for label, _ in self.columns])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+
+        splitter.addWidget(self.table)
+
+        details_panel = QWidget()
+        details_layout = QVBoxLayout(details_panel)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.addWidget(QLabel("Details"))
+
+        self.details = QTextBrowser()
+        self.details.setOpenExternalLinks(True)
+        self.details.setReadOnly(True)
+        details_layout.addWidget(self.details)
+
+        if details_actions:
+            actions_layout = QHBoxLayout()
+            for label, handler in details_actions:
+                button = QPushButton(label)
+                button.clicked.connect(handler)
+                button.setEnabled(False)
+                self._action_buttons.append(button)
+                actions_layout.addWidget(button)
+            actions_layout.addStretch()
+            details_layout.addLayout(actions_layout)
+
+        splitter.addWidget(details_panel)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+
+        layout.addWidget(splitter)
+
+    def refresh(self) -> None:
+        try:
+            self._all_records = list(self.load_records())
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            self._all_records = []
+            self._show_error(f"Failed to load {self.title}: {exc}")
+
+        self._apply_filter(self.filter_input.text())
+
+    def selected_record(self) -> object | None:
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return None
+        row = selected_rows[0].row()
+        if row < 0 or row >= len(self.records):
+            return None
+        return self.records[row]
+
+    def selected_id(self) -> str | None:
+        record = self.selected_record()
+        if record is None:
+            return None
+        data = asdict(record)
+        return str(data.get("id")) if data.get("id") else None
+    
+    def current_records(self) -> list[object]:
+        return list(self.records)
+
+    def current_filter(self) -> str:
+        return self.filter_input.text().strip()
+
+    def _on_selection_changed(self) -> None:
+        record = self.selected_record()
+        self._update_details(record)
+
+    def _update_details(self, record: object | None) -> None:
+        if record is None:
+            self.details.setHtml(_fmt_html("Select a row to see details."))
+            self._set_actions_enabled(False)
+            return
+        self.details.setHtml(self.format_details(record))
+        self._set_actions_enabled(True)
+
+    def _set_actions_enabled(self, enabled: bool) -> None:
+        for button in self._action_buttons:
+            button.setEnabled(enabled)
+
+    def _apply_filter(self, text: str) -> None:
+        query = text.strip()
+        if query == "":
+            self.records = list(self._all_records)
+        else:
+            self.records = [record for record in self._all_records if self._matches(record, query)]
+        self._render_records()
+
+    def _matches(self, record: object, query: str) -> bool:
+        tokens = [token for token in query.split() if token]
+        if not tokens:
+            return True
+
+        for token in tokens:
+            if ":" in token:
+                key, value = token.split(":", 1)
+                if not self._match_keyed_token(record, key, value):
+                    return False
+            else:
+                if not self._match_free_token(record, token):
+                    return False
+        return True
+
+    def _match_free_token(self, record: object, token: str) -> bool:
+        needle = token.lower()
+        for _, getter in self.columns:
+            value = _fmt(getter(record)).lower()
+            if needle in value:
+                return True
+        return False
+
+    def _match_keyed_token(self, record: object, key: str, value: str) -> bool:
+        key = key.strip().lower()
+        needle = value.strip().lower()
+        if key == "" or needle == "":
+            return False
+
+        column_lookup = {label.lower(): getter for label, getter in self.columns}
+        getter = column_lookup.get(key)
+        if getter is None:
+            return False
+
+        cell = _fmt(getter(record)).lower()
+        return needle in cell
+
+    def _clear_filter(self) -> None:
+        self.filter_input.clear()
+
+    def _render_records(self) -> None:
+        self.table.setRowCount(len(self.records))
+        for row_index, record in enumerate(self.records):
+            for col_index, (_, getter) in enumerate(self.columns):
+                value = _truncate(getter(record))
+                item = QTableWidgetItem(value)
+                item.setToolTip(_fmt(getter(record)))
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                self.table.setItem(row_index, col_index, item)
+
+        total = len(self._all_records)
+        shown = len(self.records)
+        if self.filter_input.text().strip():
+            self.count_label.setText(f"Count: {shown} (filtered from {total})")
+        else:
+            self.count_label.setText(f"Count: {shown}")
+
+        self.table.clearSelection()
+        self._update_details(None)
+
+    def _show_error(self, message: str) -> None:
+        QMessageBox.critical(self, "Error", message)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Specs Updates UI")
+        self.resize(1200, 800)
+
+        central = QWidget()
+        layout = QVBoxLayout(central)
+
+        actions_layout = QHBoxLayout()
+
+        self.ingest_button = QPushButton("Ingest")
+        self.ingest_button.clicked.connect(self.handle_ingest)
+        actions_layout.addWidget(self.ingest_button)
+
+        self.transform_artifacts_button = QPushButton("Transform Artifacts")
+        self.transform_artifacts_button.clicked.connect(self.handle_transform_artifacts)
+        actions_layout.addWidget(self.transform_artifacts_button)
+
+        self.transform_oq_button = QPushButton("Transform OQs")
+        self.transform_oq_button.clicked.connect(self.handle_transform_oq)
+        actions_layout.addWidget(self.transform_oq_button)
+
+        self.decide_oq_button = QPushButton("Manual Decision")
+        self.decide_oq_button.clicked.connect(self.handle_decide_oq)
+        actions_layout.addWidget(self.decide_oq_button)
+
+        self.publish_oqs_button = QPushButton("Publish OQs")
+        self.publish_oqs_button.clicked.connect(self.handle_publish_oqs_bulk)
+        actions_layout.addWidget(self.publish_oqs_button)
+
+        self.approve_pu_button = QPushButton("Approve PU")
+        self.approve_pu_button.clicked.connect(self.handle_approve_pu)
+        actions_layout.addWidget(self.approve_pu_button)
+
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_all)
+        actions_layout.addWidget(self.refresh_button)
+
+        actions_layout.addStretch()
+
+        system_separator = QFrame()
+        system_separator.setFrameShape(QFrame.VLine)
+        system_separator.setFrameShadow(QFrame.Sunken)
+        system_separator.setFixedHeight(24)
+        actions_layout.addWidget(system_separator)
+
+        self.reset_data_button = QPushButton("Clear Data")
+        self.reset_data_button.clicked.connect(self.handle_reset_data)
+        actions_layout.addWidget(self.reset_data_button)
+
+        self.set_last_ts_button = QPushButton("Set last_ts")
+        self.set_last_ts_button.clicked.connect(self.handle_set_last_ts)
+        actions_layout.addWidget(self.set_last_ts_button)
+
+        layout.addLayout(actions_layout)
+
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+
+        self.setCentralWidget(central)
+
+        self._build_tabs()
+        self.refresh_all()
+
+    def _build_tabs(self) -> None:
+        self.artifacts_tab = RecordsTab(
+            title="Artifacts",
+            columns=[
+                ("ID", lambda a: a.id),
+                ("Type", lambda a: a.type.value if hasattr(a.type, "value") else a.type),
+                ("Status", lambda a: a.status),
+                ("Rephrasing", lambda a: a.rephrasing),
+            ],
+            load_records=self._load_artifacts,
+            format_details=_format_artifact_details,
+            details_actions=[
+                ("Change Status", self.handle_change_artifact_status),
+            ],
+        )
+        self.tabs.addTab(self.artifacts_tab, "Artifacts")
+
+        self.oq_tab = RecordsTab(
+            title="Open Questions (All)",
+            columns=[
+                ("ID", lambda o: o.id),
+                ("Status", lambda o: o.status),
+                ("Question", lambda o: o.question),
+                ("Decision", lambda o: o.decision),
+            ],
+            load_records=self._load_open_questions,
+            format_details=_format_open_question_details,
+            details_actions=[
+                ("Manual Decision", self.handle_decide_oq),
+                ("Build decision", self.handle_build_decision),
+                ("Modify OQ", self.handle_modify_oq),
+                ("Publish OQ", self.handle_publish_oq),
+                ("Delete OQ", self.handle_delete_oq),
+            ],
+        )
+        self.tabs.addTab(self.oq_tab, "Open Questions (All)")
+
+        self.pu_tab = RecordsTab(
+            title="Proposed Updates",
+            columns=[
+                ("ID", lambda p: p.id),
+                ("Status", lambda p: p.status),
+                ("Rephrasing", lambda p: p.rephrasing),
+                ("Decision", lambda p: p.decision),
+            ],
+            load_records=self._load_proposed_updates,
+            format_details=_format_proposed_update_details,
+        )
+        self.tabs.addTab(self.pu_tab, "Proposed Updates")
+
+    def refresh_all(self) -> None:
+        self.artifacts_tab.refresh()
+        self.oq_tab.refresh()
+        self.pu_tab.refresh()
+        self.statusBar().showMessage("Data refreshed", 3000)
+
+    def handle_ingest(self) -> None:
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Ingest",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        try:
+            ingest_use_case = build_ingest_use_case()
+            result = ingest_use_case.execute(channel.strip())
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Ingest failed", str(exc))
+            return
+
+        if result.threads_fetched == 0:
+            QMessageBox.information(self, "Ingest", "No new threads found.")
+        else:
+            message = (
+                f"Created {result.artifacts_created} artifacts. "
+                f"OQ: {result.oq_count}, PU: {result.pu_count}, "
+                f"IRRELEVANT: {result.irrelevant_count}."
+            )
+            QMessageBox.information(self, "Ingest", message)
+
+        self.refresh_all()
+
+    def handle_transform_artifacts(self) -> None:
+        try:
+            use_case = build_transform_artifacts_use_case()
+            oq_count, pu_count = use_case.execute()
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Transform failed", str(exc))
+            return
+
+        QMessageBox.information(
+            self,
+            "Transform Artifacts",
+            f"Created {oq_count} OQ and {pu_count} PU.",
+        )
+        self.refresh_all()
+
+    def handle_transform_oq(self) -> None:
+        try:
+            use_case = build_transform_oq_use_case()
+            result = use_case.execute()
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Transform failed", str(exc))
+            return
+
+        QMessageBox.information(
+            self,
+            "Transform OQs",
+            f"Created {result.transformed_count} proposed updates.",
+        )
+        self.refresh_all()
+
+    def handle_reset_data(self) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Clear Data",
+            "Clear all stored data (artifacts, questions, updates, threads, conversations)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_reset_data_use_case()
+            result = use_case.execute()
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Clear Data", str(exc))
+            return
+
+        if result.success:
+            QMessageBox.information(self, "Clear Data", "Data cleared.")
+            self.refresh_all()
+        else:
+            QMessageBox.warning(self, "Clear Data", "Data was not cleared.")
+
+    def handle_set_last_ts(self) -> None:
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Set last_ts",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        days_back, ok = QInputDialog.getDouble(
+            self,
+            "Set last_ts",
+            "Days back from now",
+            3.0,
+            0.0,
+            3650.0,
+            2,
+        )
+        if not ok:
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm set last_ts",
+            f"Set last_ts for {channel.strip()} to {days_back} day(s) back?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_set_last_ts_use_case()
+            result = use_case.execute(channel.strip(), days_back)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Set last_ts", str(exc))
+            return
+
+        QMessageBox.information(
+            self,
+            "Set last_ts",
+            f"last_ts set for {result.channel_id} to {result.last_ts}.",
+        )
+
+    def handle_change_artifact_status(self) -> None:
+        record = self.artifacts_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Change Status", "Select an artifact first.")
+            return
+
+        choices = ["OQ", "PU", "IRRELEVANT"]
+        current = record.status if record.status in choices else None
+        status, ok = QInputDialog.getItem(
+            self,
+            "Change Status",
+            f"Artifact {record.id} status",
+            choices,
+            choices.index(current) if current in choices else 0,
+            False,
+        )
+        if not ok or status.strip() == "":
+            return
+
+        if status == record.status:
+            QMessageBox.information(self, "Change Status", "Status is unchanged.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm status change",
+            f"Change status of {record.id} to {status}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_change_artifact_status_use_case()
+            result = use_case.execute(record.id, status)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Change Status", str(exc))
+            return
+
+        if not result.updated:
+            QMessageBox.warning(self, "Change Status", f"Artifact {record.id} not found.")
+        else:
+            QMessageBox.information(self, "Change Status", f"Status updated for {record.id}.")
+            self.refresh_all()
+
+    def handle_decide_oq(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Manual Decision", "Select an OQ first.")
+            return
+        oq_id = str(record.id)
+
+        dialog = DecisionDialog(
+            self,
+            decision=record.decision or "",
+            rationale=record.decision_rationale or "",
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        decision, rationale = dialog.values()
+
+        try:
+            use_case = build_add_decision_use_case()
+            result = use_case.execute(oq_id, decision, rationale)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Manual Decision", str(exc))
+            return
+
+        if not result.updated:
+            QMessageBox.warning(self, "Manual Decision", f"OQ {oq_id} not found.")
+        else:
+            QMessageBox.information(self, "Manual Decision", f"Decision saved for {oq_id}.")
+            self.refresh_all()
+
+    def handle_build_decision(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Build decision", "Select an OQ first.")
+            return
+
+        if not record.published_channel_id or not record.published_message_ts:
+            QMessageBox.warning(
+                self,
+                "Build decision",
+                "OQ must be published before building a decision from the thread.",
+            )
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm build decision",
+            f"Build decision for {record.id} using the Slack thread and LLM?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_decision_from_thread_use_case()
+            result = use_case.execute(str(record.id))
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Build decision", str(exc))
+            return
+
+        if not result.updated:
+            reason = result.reason or "unknown"
+            reason_map = {
+                "missing_oq": "OQ not found.",
+                "not_published": "OQ must be published before building a decision.",
+                "thread_missing": "Slack thread not found or empty.",
+                "no_tech_messages": "No eligible replies found in the thread.",
+                "llm_failed": "Decision model failed to produce a result.",
+                "empty_decision": "Decision result was empty.",
+            }
+            QMessageBox.warning(self, "Build decision", reason_map.get(reason, f"Failed: {reason}"))
+            return
+
+        QMessageBox.information(
+            self,
+            "Build decision",
+            f"Decision built and saved for {record.id}. Messages used: {result.messages_used}.",
+        )
+        self.refresh_all()
+
+    def handle_modify_oq(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Modify OQ", "Select an OQ first.")
+            return
+
+        dialog = EditOQDialog(
+            self,
+            question=record.question or "",
+            context=record.context or "",
+            decision=record.decision or "",
+            rationale=record.decision_rationale or "",
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        question, context, decision, rationale = dialog.values()
+        confirm = QMessageBox.question(
+            self,
+            "Confirm OQ update",
+            f"Apply changes to OQ {record.id}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_modify_oq_use_case()
+            result = use_case.execute(
+                record.id,
+                question=question,
+                context=context,
+                decision=decision,
+                decision_rationale=rationale,
+            )
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Modify OQ", str(exc))
+            return
+
+        if not result.updated:
+            QMessageBox.warning(self, "Modify OQ", f"OQ {record.id} not found.")
+        else:
+            QMessageBox.information(self, "Modify OQ", f"OQ {record.id} updated.")
+            self.refresh_all()
+
+    def handle_delete_oq(self) -> None:
+        oq_id = self.oq_tab.selected_id()
+        if not oq_id:
+            QMessageBox.information(self, "Delete OQ", "Select an OQ first.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm delete",
+            "Delete this OQ? Its artifact will be marked IRRELEVANT and linked PUs removed.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_delete_oq_use_case()
+            result = use_case.execute(oq_id)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Delete OQ", str(exc))
+            return
+
+        if not result.deleted:
+            QMessageBox.warning(self, "Delete OQ", f"OQ {oq_id} not found.")
+        else:
+            QMessageBox.information(self, "Delete OQ", f"OQ {oq_id} deleted.")
+            self.refresh_all()
+
+    def handle_publish_oq(self) -> None:
+        record = self.oq_tab.selected_record()
+        if record is None:
+            QMessageBox.information(self, "Publish OQ", "Select an OQ first.")
+            return
+
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Publish OQ",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm publish",
+            f"Publish OQ {record.id} to {channel.strip()}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        try:
+            use_case = build_publish_oqs_use_case()
+            result = use_case.execute([record.id], channel.strip())
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Publish OQ", str(exc))
+            return
+
+        message = None
+        if result.missing_ids:
+            message = f"OQ {record.id} not found."
+            QMessageBox.warning(self, "Publish OQ", message)
+        elif result.failed_ids:
+            message = f"Failed to publish OQ {record.id}."
+            QMessageBox.critical(self, "Publish OQ", message)
+        elif result.updated_ids:
+            message = f"Updated published message for {record.id}."
+            QMessageBox.information(self, "Publish OQ", message)
+        elif result.published_ids:
+            message = f"Published OQ {record.id}."
+            QMessageBox.information(self, "Publish OQ", message)
+        elif result.skipped_ids:
+            message = f"OQ {record.id} already published and not modified."
+            QMessageBox.information(self, "Publish OQ", message)
+        else:
+            message = f"No action taken for {record.id}."
+            QMessageBox.information(self, "Publish OQ", message)
+
+        self.refresh_all()
+
+    def handle_publish_oqs_bulk(self) -> None:
+        records = self.oq_tab.current_records()
+        if not records:
+            QMessageBox.information(self, "Publish OQs", "No OQs in the current view.")
+            return
+
+        default_channel = os.getenv("SLACK_CHANNEL_ID", "general")
+        channel, ok = QInputDialog.getText(
+            self,
+            "Publish OQs",
+            "Slack channel ID",
+            text=default_channel,
+        )
+        if not ok or channel.strip() == "":
+            return
+
+        filter_text = self.oq_tab.current_filter()
+        count = len(records)
+        if filter_text:
+            scope_note = f"Filter: {filter_text}"
+        else:
+            scope_note = "No filter applied."
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm publish",
+            f"Publish {count} OQ(s) to {channel.strip()}?\n{scope_note}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        oq_ids = [record.id for record in records]
+        try:
+            use_case = build_publish_oqs_use_case()
+            result = use_case.execute(oq_ids, channel.strip())
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Publish OQs", str(exc))
+            return
+
+        lines: list[str] = []
+        if result.published_ids:
+            lines.append(f"Published: {len(result.published_ids)}")
+        if result.updated_ids:
+            lines.append(f"Updated: {len(result.updated_ids)}")
+        if result.skipped_ids:
+            lines.append(f"Skipped (not modified): {len(result.skipped_ids)}")
+        if result.missing_ids:
+            lines.append(f"Missing: {len(result.missing_ids)}")
+        if result.failed_ids:
+            lines.append(f"Failed: {len(result.failed_ids)}")
+
+        message = "\n".join(lines) if lines else "No action taken."
+        if result.failed_ids:
+            QMessageBox.warning(self, "Publish OQs", message)
+        else:
+            QMessageBox.information(self, "Publish OQs", message)
+
+        self.refresh_all()
+
+    def handle_approve_pu(self) -> None:
+        pu_id = self.pu_tab.selected_id()
+        if not pu_id:
+            QMessageBox.information(self, "Approve PU", "Select a proposed update first.")
+            return
+
+        try:
+            use_case = build_approve_pu_use_case()
+            result = use_case.execute(pu_id)
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            QMessageBox.critical(self, "Approve PU", str(exc))
+            return
+
+        if result.spec_update is None:
+            QMessageBox.warning(self, "Approve PU", f"PU {pu_id} not found.")
+            return
+
+        remaining = result.remaining_drafts
+        message = f"Approved {pu_id}. Remaining drafts: {remaining}."
+        QMessageBox.information(self, "Approve PU", message)
+        self.refresh_all()
+
+    @staticmethod
+    def _load_artifacts() -> Iterable[object]:
+        use_case = build_list_artifacts_use_case()
+        return use_case.execute()
+
+    @staticmethod
+    def _load_open_questions() -> Iterable[object]:
+        use_case = build_list_all_oq_use_case()
+        return use_case.execute()
+
+    @staticmethod
+    def _load_proposed_updates() -> Iterable[object]:
+        use_case = build_list_proposed_updates_use_case()
+        return use_case.execute()
+
+
+def _format_artifact_details(artifact: object) -> str:
+    data = asdict(artifact)
+    artifact_type = data.get("type")
+    if hasattr(artifact_type, "value"):
+        artifact_type = artifact_type.value
+    lines = [
+        f"<b>ID:</b> {_fmt_html(data.get('id'))}",
+        f"<b>Conversation ID:</b> {_fmt_html(data.get('conversation_id'))}",
+        f"<b>Type:</b> {_fmt_html(artifact_type)}",
+        f"<b>Status:</b> {_fmt_html(data.get('status'))}",
+        f"<b>Thread URL:</b> {_link_html(data.get('source_thread_url'))}",
+        f"<b>Channel ID:</b> {_fmt_html(data.get('source_channel_id'))}",
+        f"<b>Thread TS:</b> {_fmt_html(data.get('source_thread_ts'))}",
+        "",
+        "<b>Rephrasing:</b>",
+        _fmt_html(data.get("rephrasing")),
+        "",
+        "<b>Rationale:</b>",
+        _fmt_html(data.get("rationale")),
+        "",
+        "<b>Summary of context:</b>",
+        _fmt_html(data.get("summary_of_context")),
+    ]
+    return "<br>".join(lines)
+
+
+def _format_open_question_details(oq: object) -> str:
+    data = asdict(oq)
+    lines = [
+        f"<b>ID:</b> {_fmt_html(data.get('id'))}",
+        f"<b>Artifact ID:</b> {_fmt_html(data.get('artifact_id'))}",
+        f"<b>Status:</b> {_fmt_html(data.get('status'))}",
+        f"<b>Slack TS:</b> {_fmt_html(data.get('slack_ts'))}",
+        f"<b>Thread URL:</b> {_link_html(data.get('source_thread_url'))}",
+        f"<b>Channel ID:</b> {_fmt_html(data.get('source_channel_id'))}",
+        f"<b>Thread TS:</b> {_fmt_html(data.get('source_thread_ts'))}",
+        "",
+        "<b>Question:</b>",
+        _fmt_html(data.get("question")),
+        "",
+        "<b>Context:</b>",
+        _fmt_html(data.get("context")),
+        "",
+        "<b>Decision:</b>",
+        _fmt_html(data.get("decision")),
+        "",
+        "<b>Decision rationale:</b>",
+        _fmt_html(data.get("decision_rationale")),
+    ]
+    return "<br>".join(lines)
+
+
+def _format_proposed_update_details(pu: object) -> str:
+    data = asdict(pu)
+    lines = [
+        f"<b>ID:</b> {_fmt_html(data.get('id'))}",
+        f"<b>Artifact ID:</b> {_fmt_html(data.get('artifact_id'))}",
+        f"<b>Source OQ ID:</b> {_fmt_html(data.get('source_oq_id'))}",
+        f"<b>Status:</b> {_fmt_html(data.get('status'))}",
+        f"<b>Thread URL:</b> {_link_html(data.get('source_thread_url'))}",
+        f"<b>Channel ID:</b> {_fmt_html(data.get('source_channel_id'))}",
+        f"<b>Thread TS:</b> {_fmt_html(data.get('source_thread_ts'))}",
+        "",
+        "<b>Rephrasing:</b>",
+        _fmt_html(data.get("rephrasing")),
+        "",
+        "<b>Context:</b>",
+        _fmt_html(data.get("context")),
+        "",
+        "<b>Decision:</b>",
+        _fmt_html(data.get("decision")),
+        "",
+        "<b>Rationale:</b>",
+        _fmt_html(data.get("rationale")),
+    ]
+    return "<br>".join(lines)
+
+
+def main() -> None:
+    load_dotenv(override=True)
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

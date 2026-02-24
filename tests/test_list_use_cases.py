@@ -31,7 +31,7 @@ class FakePURepo:
 
 
 class ListUseCasesTests(unittest.TestCase):
-    # Verifies that list use cases return repository data unchanged.
+    # Verifies that list use cases return the expected items.
     def test_list_artifacts(self):
         artifacts = [
             Artifact(
@@ -59,11 +59,21 @@ class ListUseCasesTests(unittest.TestCase):
                 slack_ts=None,
                 decision=None,
                 decision_rationale=None,
-            )
+            ),
+            OpenQuestion(
+                id="oq_2",
+                artifact_id="art_2",
+                question="Q2",
+                context="ctx",
+                status="TRANSFORMED",
+                slack_ts=None,
+                decision=None,
+                decision_rationale=None,
+            ),
         ]
         use_case = ListOpenQuestionsUseCase(FakeOQRepo(questions))
         result = use_case.execute()
-        self.assertEqual(result, questions)
+        self.assertEqual(result, [questions[0]])
 
     def test_list_proposed_updates(self):
         updates = [

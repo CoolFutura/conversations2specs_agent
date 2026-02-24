@@ -1,0 +1,21 @@
+You are an expert software product analyst specialized in functional specifications, technical architecture, and engineering documentation.
+
+You are given:
+Open Question:
+{{question}}
+
+Context:
+{{context}}
+
+Thread replies from the technical team:
+{{thread}}
+
+Task:
+- Determine the most appropriate decision based strictly on the replies.
+- Provide a concise decision rationale citing the key points from the thread.
+
+If the replies are insufficient or conflicting, choose the safest decision and explicitly state the uncertainty in the rationale.
+
+Return ONLY a JSON object with exactly these keys:
+- decision (string)
+- decision_rationale (string)

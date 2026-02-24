@@ -11,6 +11,7 @@ from src.cli.wiring import (
     build_transform_artifacts_use_case,
     build_transform_oq_use_case,
     build_add_decision_use_case,
+    build_decision_from_thread_use_case,
     build_modify_oq_use_case,
     build_approve_pu_use_case,
     build_change_artifact_status_use_case,
@@ -19,6 +20,11 @@ from src.cli.wiring import (
     build_list_open_questions_use_case,
     build_list_proposed_updates_use_case,
     build_init_sync_use_case,
+    build_reset_data_use_case,
+    build_set_last_ts_use_case,
+    build_delete_oq_use_case,
+    build_delete_oq_batch_use_case,
+    build_publish_oqs_use_case,
 )
 
 class SpecsUpdatesAgent:
@@ -49,8 +55,24 @@ class SpecsUpdatesAgent:
         oq_decide_parser = subparsers.add_parser("oq_decide", help="Add a decision to an Open Question")
         oq_decide_parser.add_argument("oq_id", help="OQ ID")
 
+        # Command: oq_decide_thread
+        oq_decide_thread_parser = subparsers.add_parser(
+            "oq_decide_thread", help="Build decision from Slack thread replies"
+        )
+        oq_decide_thread_parser.add_argument("oq_id", help="OQ ID")
+
         # Command: oq_transform
         subparsers.add_parser("oq_transform", help="Transform decided OQs into PUs")
+
+        # Command: oq_delete
+        oq_delete_parser = subparsers.add_parser("oq_delete", help="Delete one or more OQs and mark artifacts IRRELEVANT")
+        oq_delete_parser.add_argument("oq_ids", nargs="+", help="OQ IDs")
+        oq_delete_parser.add_argument("--yes", action="store_true", help="Confirm delete without prompt")
+
+        # Command: publish_oq
+        publish_parser = subparsers.add_parser("publish_oq", help="Publish one or more OQs to Slack")
+        publish_parser.add_argument("oq_ids", nargs="+", help="OQ IDs")
+        publish_parser.add_argument("--channel", help="Slack channel ID (optional, uses .env or --channel)")
 
         # Command: approve_pu
         pu_app_parser = subparsers.add_parser("approve_pu", help="Approve a Proposed Update")
@@ -59,6 +81,15 @@ class SpecsUpdatesAgent:
         # Command: init_sync
         init_parser = subparsers.add_parser("init_sync", help="Initialize the sync timestamp to current time to skip history")
         init_parser.add_argument("--channel", help="Specific channel ID to initialize (optional, uses .env or --channel)")
+
+        # Command: set_last_ts
+        set_ts_parser = subparsers.add_parser("set_last_ts", help="Set last_ts by days back from now")
+        set_ts_parser.add_argument("--channel", help="Specific channel ID to set (optional, uses .env or --channel)")
+        set_ts_parser.add_argument("--days", type=float, help="Number of days back (e.g. 3)")
+
+        # Command: reset_data
+        reset_parser = subparsers.add_parser("reset_data", help="Reset stored JSON data")
+        reset_parser.add_argument("--yes", action="store_true", help="Confirm reset without prompt")
 
         # Command: art_list
         subparsers.add_parser("art_list", help="List all artifacts")
@@ -97,9 +128,13 @@ class SpecsUpdatesAgent:
         artifacts_created = result.artifacts_created
 
         if artifacts_created > 0:
-            print(f"Successfully created {artifacts_created} new artifacts.")
+            print(
+                "Successfully created "
+                f"{artifacts_created} new artifacts "
+                f"(OQ: {result.oq_count}, PU: {result.pu_count}, IRRELEVANT: {result.irrelevant_count})."
+            )
         else:
-            print("No new relevant artifacts found in the ingested threads.")
+            print("No new artifacts found in the ingested threads.")
 
     def cmd_change_status(self, args):
         status_choices = {"OQ", "PU", "IRRELEVANT"}
@@ -156,6 +191,78 @@ class SpecsUpdatesAgent:
             return
 
         print(f"Decision saved for OQ {args.oq_id}.")
+
+    def cmd_oq_decide_thread(self, args):
+        print(f"Building decision from Slack thread for OQ {args.oq_id}...")
+        use_case = build_decision_from_thread_use_case()
+        result = use_case.execute(args.oq_id)
+
+        if not result.updated:
+            reason = result.reason or "unknown_error"
+            if reason == "missing_oq":
+                print(f"OQ {args.oq_id} not found.")
+            elif reason == "not_published":
+                print("OQ is not published to Slack yet.")
+            elif reason == "thread_missing":
+                print("Slack thread not found or empty.")
+            elif reason == "no_tech_messages":
+                print("No tech team replies found in the thread.")
+            elif reason == "llm_failed":
+                print("LLM failed to generate a decision.")
+            elif reason == "empty_decision":
+                print("LLM returned an empty decision or rationale.")
+            else:
+                print(f"Failed to build decision: {reason}")
+            return
+
+        print(f"Decision saved for OQ {args.oq_id}.")
+        if result.decision:
+            print(f"Decision: {result.decision}")
+
+    def cmd_oq_delete(self, args):
+        oq_ids = list(args.oq_ids)
+        if not oq_ids:
+            print("No OQ IDs provided.")
+            return
+
+        if not args.yes:
+            plural = "s" if len(oq_ids) > 1 else ""
+            confirm = input(
+                f"Delete {len(oq_ids)} OQ{plural} and mark artifact(s) IRRELEVANT? (y/n): "
+            ).strip().lower()
+            if confirm not in {"y", "yes"}:
+                print("Delete cancelled.")
+                return
+
+        use_case = build_delete_oq_batch_use_case()
+        result = use_case.execute(oq_ids)
+
+        if result.missing_ids:
+            print(f"Not found: {', '.join(result.missing_ids)}")
+
+        if result.deleted_ids:
+            print(f"Deleted: {', '.join(result.deleted_ids)}")
+
+    def cmd_publish_oq(self, args):
+        channel_id = args.channel or os.getenv("SLACK_CHANNEL_ID", "general")
+        oq_ids = list(args.oq_ids)
+        if not oq_ids:
+            print("No OQ IDs provided.")
+            return
+
+        use_case = build_publish_oqs_use_case()
+        result = use_case.execute(oq_ids, channel_id)
+
+        if result.missing_ids:
+            print(f"Not found: {', '.join(result.missing_ids)}")
+        if result.failed_ids:
+            print(f"Failed: {', '.join(result.failed_ids)}")
+        if result.skipped_ids:
+            print(f"Skipped (not modified): {', '.join(result.skipped_ids)}")
+        if result.updated_ids:
+            print(f"Updated: {', '.join(result.updated_ids)}")
+        if result.published_ids:
+            print(f"Published: {', '.join(result.published_ids)}")
 
     def cmd_approve_pu(self, args):
         print(f"Approving PU {args.pu_id}...")
@@ -220,6 +327,25 @@ class SpecsUpdatesAgent:
         print(f"Sync initialized for channel {channel_id} at timestamp {current_ts}.")
         print("Future 'ingest' commands will only fetch messages from this point forward.")
 
+    def cmd_set_last_ts(self, args):
+        channel_id = args.channel or os.getenv("SLACK_CHANNEL_ID", "general")
+        days = args.days
+        if days is None:
+            raw = input("Enter number of days back (e.g. 3): ").strip()
+            try:
+                days = float(raw)
+            except ValueError:
+                print("Invalid number of days.")
+                return
+
+        if days < 0:
+            print("Days must be a non-negative number.")
+            return
+
+        use_case = build_set_last_ts_use_case()
+        result = use_case.execute(channel_id, days)
+        print(f"Set last_ts for channel {channel_id} to {result.last_ts}.")
+
     def cmd_art_list(self, args):
         use_case = build_list_artifacts_use_case()
         artifacts = use_case.execute()
@@ -265,6 +391,18 @@ class SpecsUpdatesAgent:
             if len(rephrasing) > 60:
                 rephrasing = rephrasing[:57] + "..."
             print(f"{pu.id:<25} {pu.status:<15} {rephrasing}")
+
+    def cmd_reset_data(self, args):
+        if not args.yes:
+            confirm = input("This will clear all data JSON files. Continue? (y/n): ").strip().lower()
+            if confirm not in {"y", "yes"}:
+                print("Reset cancelled.")
+                return
+
+        use_case = build_reset_data_use_case()
+        result = use_case.execute()
+        if result.success:
+            print("Data reset completed.")
 
 def main():
     agent = SpecsUpdatesAgent()

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import uuid
+import datetime
 from dataclasses import dataclass
 
-from src.domain.models import OpenQuestion, ProposedUpdate
+from src.domain.models import OpenQuestion
 from src.ports.repositories import OpenQuestionRepository, ProposedUpdateRepository
 
 
@@ -32,6 +32,7 @@ class ModifyOQUseCase:
             return ModifyOQResult(updated=False, oq=None)
 
         was_decided = oq.status == "DECIDED"
+        was_transformed = oq.status == "TRANSFORMED"
 
         if question is not None:
             oq.question = question
@@ -43,13 +44,10 @@ class ModifyOQUseCase:
             oq.decision_rationale = decision_rationale
 
         oq.status = "DECIDED" if self._has_decision(oq) else "OPEN"
+        oq.last_modified_at = datetime.datetime.now().isoformat()
         self.oq_repo.save(oq)
 
-        if oq.status == "DECIDED":
-            self.pu_repo.delete_by_source_oq_id(oq.id)
-            pu = self._create_pu_from_oq(oq)
-            self.pu_repo.save(pu)
-        elif was_decided:
+        if was_decided or was_transformed:
             self.pu_repo.delete_by_source_oq_id(oq.id)
 
         return ModifyOQResult(updated=True, oq=oq)
@@ -60,15 +58,3 @@ class ModifyOQUseCase:
         if str(oq.decision).strip() == "" or str(oq.decision_rationale).strip() == "":
             return False
         return True
-
-    def _create_pu_from_oq(self, oq: OpenQuestion) -> ProposedUpdate:
-        return ProposedUpdate(
-            id=f"pu_from_oq_{uuid.uuid4().hex[:8]}",
-            artifact_id=oq.artifact_id,
-            source_oq_id=oq.id,
-            rephrasing=oq.question,
-            context=oq.context,
-            decision=oq.decision or "",
-            rationale=oq.decision_rationale or "Transformed from OQ",
-            status="DRAFT",
-        )

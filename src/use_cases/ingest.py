@@ -16,6 +16,9 @@ Normalizer = Callable[[dict], str]
 class IngestResult:
     threads_fetched: int
     artifacts_created: int
+    oq_count: int
+    pu_count: int
+    irrelevant_count: int
 
 
 class IngestUseCase:
@@ -41,7 +44,13 @@ class IngestUseCase:
     ) -> IngestResult:
         threads = self.slack_port.fetch_threads(channel_id)
         if not threads:
-            return IngestResult(threads_fetched=0, artifacts_created=0)
+            return IngestResult(
+                threads_fetched=0,
+                artifacts_created=0,
+                oq_count=0,
+                pu_count=0,
+                irrelevant_count=0,
+            )
 
         if on_start_run:
             on_start_run()
@@ -60,4 +69,7 @@ class IngestUseCase:
         return IngestResult(
             threads_fetched=len(threads),
             artifacts_created=result.artifacts_created,
+            oq_count=result.oq_count,
+            pu_count=result.pu_count,
+            irrelevant_count=result.irrelevant_count,
         )

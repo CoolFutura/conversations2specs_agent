@@ -70,11 +70,15 @@ class IngestThreadsUseCaseTests(unittest.TestCase):
 
         result = use_case.execute(threads)
 
-        self.assertEqual(result.artifacts_created, 1)
-        self.assertEqual(len(repo.saved), 1)
+        self.assertEqual(result.artifacts_created, 2)
+        self.assertEqual(len(repo.saved), 2)
         self.assertEqual(len(result.conversations), 3)
         # only two threads classified (third is duplicate)
         self.assertEqual(len(llm.calls), 2)
+        self.assertTrue(any(art.status == "IRRELEVANT" for art in repo.saved))
+        self.assertEqual(result.oq_count, 1)
+        self.assertEqual(result.pu_count, 0)
+        self.assertEqual(result.irrelevant_count, 1)
 
 
 if __name__ == "__main__":
